@@ -87,6 +87,7 @@ clone https://github.com/bhilburn/powerlevel9k "$HOME/.oh-my-zsh/custom/themes/p
 
 if git -C "$DOTFILES" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$DOTFILES" config core.hooksPath .githooks
+  git -C "$DOTFILES" config user.email 78459398+TraderSamwise@users.noreply.github.com
 else
   echo "skip   pre-commit hook ($DOTFILES is not a git checkout)"
 fi

@@ -8,7 +8,7 @@ made inside VS Code shows up here — just `git add vscode && git commit`.
 
 | Path | Purpose |
 |------|---------|
-| `settings.json` | User settings (theme, prettier/eslint/ruff on save, token colors, folder colors, periscope, etc.) — symlinked into VS Code |
+| `settings.json` | User settings (theme, prettier/eslint/ruff on save, token colors, periscope, etc.) — symlinked into VS Code |
 | `keybindings.json` | Keybindings — symlinked into VS Code |
 | `snippets/` | User snippets — symlinked into VS Code |
 | `extensions.txt` | Desired marketplace extension set, one ID per line |
