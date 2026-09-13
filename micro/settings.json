@@ -1,0 +1,23 @@
+{
+    "autoindent": true,
+    "clipboard": "external",
+    "colorscheme": "atom-dark",
+    "cursorline": true,
+    "diffgutter": true,
+    "hlsearch": true,
+    "linter": false,
+    "matchbrace": true,
+    "mouse": true,
+    "mkparents": true,
+    "parsecursor": true,
+    "rmtrailingws": false,
+    "ruler": true,
+    "savecursor": true,
+    "scrollbar": true,
+    "scrollmargin": 3,
+    "softwrap": true,
+    "statusline": true,
+    "tabsize": 2,
+    "tabstospaces": true,
+    "wordwrap": true
+}

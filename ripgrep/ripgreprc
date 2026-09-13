@@ -1,0 +1,43 @@
+# Ripgrep configuration file
+# This file contains default settings for ripgrep
+
+# Always use smart case (case insensitive unless pattern contains uppercase)
+--smart-case
+
+# Show line numbers
+--line-number
+
+# Show column numbers
+--column
+
+# Use colors in output
+--color=always
+
+# Search hidden files and directories
+--hidden
+
+# Follow symbolic links
+--follow
+
+# Set max columns to prevent very long lines from slowing down search
+--max-columns=150
+
+# Set max file size to search (in bytes) - 10MB
+--max-filesize=10M
+
+# File type definitions
+--type-add=tsx:*.tsx
+--type-add=ts:*.ts
+--type-add=jsx:*.jsx
+--type-add=js:*.js
+--type-add=jtsx:*.ts,*.tsx,*.js,*.jsx
+
+# Common ignore patterns
+--glob=!.git/*
+--glob=!node_modules/*
+--glob=!.DS_Store
+--glob=!*.log
+--glob=!*.tmp
+--glob=!*.swp
+--glob=!*.swo
+--glob=!*~

@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+# VS Code keybindings name every shortcut "key", which generic-api-key misreads.
+[[allowlists]]
+description = "VS Code keybinding shortcuts"
+paths = ['''^vscode/keybindings\.json$''']

@@ -1,0 +1,120 @@
+export ZSH=$HOME/.oh-my-zsh
+ZSH_THEME="powerlevel9k/powerlevel9k"
+plugins=(git wd sublime zsh-autosuggestions zsh-syntax-highlighting history-substring-search z)
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+
+[[ -r $ZSH/oh-my-zsh.sh ]] && source $ZSH/oh-my-zsh.sh
+
+autoload -U history-search-end
+zle -N history-beginning-search-backward-end history-search-end
+zle -N history-beginning-search-forward-end history-search-end
+bindkey "^[[A" history-beginning-search-backward-end
+bindkey "^[[B" history-beginning-search-forward-end
+
+POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir rbenv vcs anaconda)
+
+# make jetbrains terminal alt key work
+bindkey "\e\eOD" backward-word
+bindkey "\e\eOC" forward-word
+
+# make cmd+backspace delete backward from cursor only (not whole line)
+bindkey '^U' backward-kill-line
+
+alias hg='history | grep'
+alias getrsa='pbcopy < ~/.ssh/id_rsa.pub'
+alias dss='docker node ps $(docker node ls -q) --filter desired-state=Running | uniq'
+
+export DEFAULT_USER="$(whoami)"
+
+export NVM_DIR="$HOME/.nvm"
+# git-cloned nvm lives in ~/.nvm; `brew install nvm` keeps its scripts under the prefix
+# (and symlinks ~/.nvm/nvm.sh on first load, but never bash_completion).
+_nvm_brew="${HOMEBREW_PREFIX:-/opt/homebrew}/opt/nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then \. "$NVM_DIR/nvm.sh"
+elif [ -s "$_nvm_brew/nvm.sh" ]; then \. "$_nvm_brew/nvm.sh"
+fi
+if [ -s "$NVM_DIR/bash_completion" ]; then \. "$NVM_DIR/bash_completion"
+elif [ -s "$_nvm_brew/etc/bash_completion.d/nvm" ]; then \. "$_nvm_brew/etc/bash_completion.d/nvm"
+fi
+unset _nvm_brew
+
+export RIPGREP_CONFIG_PATH="$HOME/.ripgreprc"
+
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
+
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+
+nu() {
+  if [[ $# -eq 0 ]]; then
+    command nu
+  else
+    command nu -c "$* | table" 2>/dev/null
+  fi
+}
+
+# --- Passwords ----------------------------------------------------------------
+
+# show a value, copy it to the clipboard, wait, then wipe scrollback
+_pwshow() {
+  local v="$1"
+  printf '%s' "$v" | pbcopy
+  echo "$v"
+  echo "(copied to clipboard)"
+  read -s -k '?Press any key to clear...'
+  clear
+  printf '\033[3J'
+}
+
+# memorable password generator (PascalCase, no separator)
+pw() {
+  _pwshow "$(xkcdpass -n 5 -d '' --case capitalize)"
+}
+
+# read YubiKey static slot output
+ykread() {
+  local v
+  printf "Press YubiKey: "
+  read -rs v
+  echo
+  _pwshow "$v"
+  unset v
+}
+
+# --- Editing: micro ----------------------------------------------------------
+
+# e            fuzzy-pick a file in the current tree and edit it
+# e <path...>  edit those files
+e() {
+  if (( $# )); then MICRO_TRUECOLOR=1 micro "$@"; return; fi
+  local f
+  f=$(rg --files --hidden --glob '!.git' 2>/dev/null \
+      | fzf --height 60% --reverse --border \
+            --preview 'sed -n 1,200p {}' --preview-window=right,60%) || return
+  [[ -n $f ]] && MICRO_TRUECOLOR=1 micro "$f"
+}
+
+# ew  pick one of the aimux worktrees under ~/cs, cd into it, then pick a file
+ew() {
+  local d
+  d=$(print -l ~/cs/*/.aimux/worktrees/*(/N) ~/cs/*(/N) 2>/dev/null \
+      | sed "s|$HOME/cs/||" \
+      | fzf --height 50% --reverse --border --prompt='worktree> ') || return
+  [[ -n $d ]] && cd ~/cs/"$d" && e
+}
+
+# eg <pattern>  grep the tree, pick a hit, open it at that line
+eg() {
+  local sel file line
+  sel=$(rg --line-number --no-heading --color=always --smart-case "${1:?pattern required}" 2>/dev/null \
+        | fzf --ansi --height 70% --reverse --border --delimiter=: \
+              --preview 'sed -n "$(( {2} > 15 ? {2} - 15 : 1 )),$(( {2} + 45 ))p" {1}' \
+              --preview-window=right,60%) || return
+  file=${sel%%:*}; sel=${sel#*:}; line=${sel%%:*}
+  [[ -n $file ]] && MICRO_TRUECOLOR=1 micro "+$line" "$file"
+}
+
+# Machine-private config (tokens, work/business aliases, conda) — never committed.
+[[ -r "$HOME/.zshrc.local" ]] && . "$HOME/.zshrc.local"
+
+# Reassert the canonical global tool order after conda/nvm/bun hooks mutate PATH.
+_sam_apply_tool_path_policy

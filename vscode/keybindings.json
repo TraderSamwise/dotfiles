@@ -1,0 +1,369 @@
+// Place your key bindings in this file to override the defaults
+[
+    {
+        "key": "up",
+        "command": "sam.cursorUpIndentAware",
+        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !parameterHintsVisible && !renameInputVisible && !editorHasSelection"
+    },
+    {
+        "key": "down",
+        "command": "sam.cursorDownIndentAware",
+        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !parameterHintsVisible && !renameInputVisible && !editorHasSelection"
+    },
+    {
+        "key": "enter",
+        "command": "sam.smartEnter",
+        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode && !renameInputVisible && !editorHasSelection"
+    },
+    {
+        "key": "tab",
+        "command": "sam.smartTab",
+        "when": "editorTextFocus && editorLangId == 'python' && !editorReadonly && !inSnippetMode && !suggestWidgetVisible && !inlineSuggestionVisible && !editorHasSelection"
+    },
+    {
+        "key": "down",
+        "command": "-editor.action.showNextParameterHint"
+    },
+    {
+        "key": "up",
+        "command": "-editor.action.showPrevParameterHint"
+    },
+    {
+        "key": "alt+down",
+        "command": "editor.action.showNextParameterHint",
+        "when": "editorFocus && parameterHintsVisible && parameterHintsMultipleSignatures"
+    },
+    {
+        "key": "alt+up",
+        "command": "editor.action.showPrevParameterHint",
+        "when": "editorFocus && parameterHintsVisible && parameterHintsMultipleSignatures"
+    },
+    {
+        "key": "cmd+i",
+        "command": "composerMode.agent"
+    },
+    {
+        "key": "cmd+5",
+        "command": "workbench.action.debug.toggleRepl"
+    },
+    {
+        "key": "ctrl+alt+comma",
+        "command": "workbench.action.debug.toggleRepl"
+    },
+    {
+        "key": "ctrl+alt+t",
+        "command": "workbench.action.terminal.toggleTerminal"
+    },
+    {
+        "key": "ctrl+alt+period",
+        "command": "workbench.action.terminal.toggleTerminal"
+    },
+    {
+        "key": "cmd+2",
+        "command": "workbench.action.terminal.toggleTerminal"
+    },
+    {
+        "key": "cmd+alt+slash",
+        "command": "editor.action.blockComment"
+    },
+    {
+        "key": "shift+cmd+slash",
+        "command": "editor.action.blockComment"
+    },
+    {
+        "key": "cmd+alt+backspace",
+        "command": "editor.action.deleteLines"
+    },
+    {
+        "key": "cmd+f12",
+        "command": "workbench.action.gotoSymbol"
+    },
+    {
+        "key": "cmd+t",
+        "command": "workbench.action.quickOpen"
+    },
+    {
+        "key": "cmd+i",
+        "command": "actions.find"
+    },
+    {
+        "key": "shift+alt+down",
+        "command": "editor.action.moveLinesDownAction"
+    },
+    {
+        "key": "ctrl+cmd+down",
+        "command": "editor.action.moveLinesDownAction"
+    },
+    {
+        "key": "shift+alt+up",
+        "command": "editor.action.moveLinesUpAction"
+    },
+    {
+        "key": "ctrl+cmd+up",
+        "command": "editor.action.moveLinesUpAction"
+    },
+    {
+        "key": "shift+cmd+]",
+        "command": "workbench.action.nextEditor"
+    },
+    {
+        "key": "ctrl+right",
+        "command": "workbench.action.nextEditor"
+    },
+    {
+        "key": "ctrl+tab",
+        "command": "workbench.action.nextEditor"
+    },
+    {
+        "key": "shift+cmd+[",
+        "command": "workbench.action.previousEditor"
+    },
+    {
+        "key": "ctrl+left",
+        "command": "workbench.action.previousEditor"
+    },
+    {
+        "key": "shift+ctrl+tab",
+        "command": "workbench.action.previousEditor"
+    },
+    {
+        "key": "shift+cmd+t",
+        "command": "workbench.action.reopenClosedEditor"
+    },
+    {
+        "key": "cmd+p",
+        "command": "workbench.action.quickOpen"
+    },
+    {
+        "key": "alt+home",
+        "command": "workbench.view.explorer"
+    },
+    {
+        "key": "ctrl+alt+o",
+        "command": "editor.action.organizeImports"
+    },
+    {
+        "key": "shift+cmd+o",
+        "command": "editor.action.organizeImports"
+    },
+    {
+        "key": "alt+p",
+        "command": "editor.action.triggerParameterHints"
+    },
+    {
+        "key": "shift+cmd+v",
+        "command": "extension.vim_toggle", // requires VSCodeVim or equivalent
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "ctrl+alt+enter",
+        "command": "editor.action.insertLineAfter" // approximate for SwitchApply
+    },
+    {
+        "key": "ctrl+alt+down",
+        "command": "workbench.action.navigateDown"
+    },
+    {
+        "key": "ctrl+alt+up",
+        "command": "workbench.action.navigateUp"
+    },
+    {
+        "key": "ctrl+alt+left",
+        "command": "workbench.action.navigateLeft"
+    },
+    {
+        "key": "ctrl+alt+right",
+        "command": "workbench.action.navigateRight"
+    },
+    {
+        "key": "shift+ctrl+g",
+        "command": "editor.action.inlineChat.start", // placeholder for inline chat
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "shift+ctrl+i",
+        "command": "editor.debug.action.toggleBreakpoint", // approximate for mute breakpoints
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "ctrl+alt+m",
+        "command": "workbench.action.terminal.toggleTerminal",
+    },
+    {
+        "key": "browserBack",
+        "command": "workbench.action.navigateBack"
+    },
+    {
+        "key": "browserForward",
+        "command": "workbench.action.navigateForward"
+    },
+    {
+        "key": "cmd+[",
+        "command": "workbench.action.navigateBack"
+    },
+    {
+        "key": "cmd+]",
+        "command": "workbench.action.navigateForward"
+    },
+    {
+        "key": "cmd+k",
+        "command": "workbench.action.terminal.clear",
+        "when": "terminalFocus"
+    },
+    {
+        "key": "cmd+1",
+        "command": "workbench.action.toggleSidebarVisibility"
+    },
+    {
+        "key": "cmd+t",
+        "command": "workbench.action.terminal.new",
+        "when": "terminalFocus || terminalHasFocus || terminalIsOpen"
+    },
+    {
+        "key": "cmd+w",
+        "command": "workbench.action.terminal.kill",
+        "when": "terminalFocus"
+    },
+    {
+        "key": "ctrl+tab",
+        "command": "workbench.action.terminal.focusNext",
+        "when": "terminalFocus"
+    },
+    {
+        "key": "ctrl+shift+tab",
+        "command": "workbench.action.terminal.focusPrevious",
+        "when": "terminalFocus"
+    },
+    {
+        "key": "cmd+shift+f",
+        "command": "workbench.view.search",
+        "when": "!searchViewletVisible"
+    },
+    {
+        "key": "cmd+shift+f",
+        "command": "workbench.view.explorer",
+        "when": "searchViewletVisible"
+    },
+    {
+        "key": "shift+f6",
+        "command": "editor.action.rename",
+        "when": "editorHasRenameProvider && editorTextFocus && !editorReadonly"
+    },
+    {
+        "key": "cmd+-",
+        "command": "editor.fold",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "cmd+=",
+        "command": "editor.unfold",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "cmd+shift+-",
+        "command": "editor.foldAll",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "cmd+shift+=",
+        "command": "editor.unfoldAll",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "cmd+shift+c",
+        "command": "workbench.action.files.copyPathOfActiveFile"
+    },
+    {
+        "key": "alt+enter",
+        "command": "editor.action.quickFix",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "cmd+i",
+        "command": "cursorai.action.generateInTerminal",
+        "when": "terminalFocus"
+    },
+    {
+        "key": "cmd+i",
+        "command": "aipopup.action.modal.generate",
+        "when": "editorTextFocus"
+    },
+    {
+        "key": "shift+f6",
+        "command": "renameFile",
+        "when": "explorerViewletVisible && filesExplorerFocus"
+    },
+    {
+        "key": "shift+f6",
+        "command": "editor.action.rename",
+        "when": "editorHasRenameProvider && editorTextFocus && !editorReadonly"
+    },
+    {
+        "key": "ctrl+alt+cmd+b",
+        "command": "gitlens.toggleFileBlame",
+        "when": "editorTextFocus && config.gitlens.keymap == 'alternate' && resource in 'gitlens:tabs:blameable'"
+    },
+    {
+        "key": "alt+b",
+        "command": "-gitlens.toggleFileBlame",
+        "when": "editorTextFocus && config.gitlens.keymap == 'alternate' && resource in 'gitlens:tabs:blameable'"
+    },
+    {
+        "key": "ctrl+alt+cmd+b",
+        "command": "gitlens.toggleFileBlame",
+        "when": "editorTextFocus && config.gitlens.keymap == 'chorded' && resource in 'gitlens:tabs:blameable'"
+    },
+    {
+        "key": "alt+cmd+g b",
+        "command": "-gitlens.toggleFileBlame",
+        "when": "editorTextFocus && config.gitlens.keymap == 'chorded' && resource in 'gitlens:tabs:blameable'"
+    },
+    {
+        "key": "cmd+/",
+        "command": "sam.commentAndMoveDownUnlessEmpty",
+        "when": "editorTextFocus && !editorReadonly"
+    },
+    {
+        "key": "ctrl+tab",
+        "command": "workbench.action.nextEditorInGroup",
+        "when": "editorFocus"
+    },
+    {
+        "key": "ctrl+shift+tab",
+        "command": "workbench.action.previousEditorInGroup",
+        "when": "editorFocus"
+    },
+    {
+        "key": "ctrl+cmd+s",
+        "command": "workbench.action.files.saveWithoutFormatting"
+    },
+    {
+        "key": "ctrl+cmd+f",
+        "command": "periscope.search"
+    },
+    {
+        "key": "shift+alt+cmd+p",
+        "command": "workbench.action.output.show.extension-output-zjffun.gotofolder-#1-Go to Folder"
+    },
+    {
+        "key": "ctrl+alt+cmd+f",
+        "command": "gotofolder.quickOpenFolder"
+    },
+    {
+        "key": "alt+cmd+y",
+        "command": "workbench.action.reloadWindow",
+    },
+    {
+        "key": "alt+cmd+s",
+        "command": "workbench.action.toggleUnifiedSidebarFromKeyboard",
+        "when": "!isAuxiliaryWindowFocusedContext"
+    },
+    {
+        "key": "cmd+,",
+        "command": "leetcode.testSolution"
+    },
+    {
+        "key": "alt+cmd+,",
+        "command": "leetcode.submitSolution"
+    }
+]

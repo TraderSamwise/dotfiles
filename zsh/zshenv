@@ -1,0 +1,25 @@
+# Selected Volta-managed CLIs live in ~/.local/volta-shims so Volta's node/npm/yarn
+# shims do not override project-managed runtimes.
+export VOLTA_HOME="$HOME/.volta"
+export BUN_INSTALL="$HOME/.bun"
+
+_sam_apply_tool_path_policy() {
+  typeset -gU path PATH
+  path=(${path:#${VOLTA_HOME}/bin})
+  path=(${path:#${VOLTA_HOME}/tools/image/*/bin})
+  path=("$HOME/.local/volta-shims" "$HOME/.local/bin" "$BUN_INSTALL/bin" $path)
+}
+
+_sam_apply_tool_path_policy
+
+[[ -r "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+_sam_apply_tool_path_policy
+
+# Cap vitest pools; the default of cores-1 per instance oversubscribes the CPU when
+# several agents test at once. Lives here so non-interactive agent shells get it.
+export VITEST_MAX_WORKERS=4   # vitest 4
+export VITEST_MAX_FORKS=4     # vitest 3
+export VITEST_MAX_THREADS=4   # vitest 3
+
+# Machine-private env for every shell (tokens scripts need) — never committed.
+[[ -r "$HOME/.zshenv.local" ]] && . "$HOME/.zshenv.local"

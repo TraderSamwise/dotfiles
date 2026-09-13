@@ -1,0 +1,13 @@
+[push]
+	default = current
+	autoSetupRemote = true
+[hub]
+	protocol = https
+[alias]
+	list-gone-branches = "!git fetch -p && git for-each-ref --format='%(if:equals=[gone])%(upstream:track)%(then)%(refname:short)%(end)' refs/heads | grep ."
+	delete-gone-branches = "! git branch -vv | grep ': gone]' |  grep -v \"*\" | awk '{ print $1; }' | xargs -r git branch -D"
+	pretty = log --pretty=format:\"%C(yellow)%h%Creset %C(cyan)%>(12)%ad%Creset %C(green)%<(7)%aN%Creset %s\" --date=short
+[submodule]
+	recurse = true
+[init]
+	defaultBranch = master

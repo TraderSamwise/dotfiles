@@ -1,0 +1,34 @@
+{
+  "name": "comment-move-down-conditional",
+  "displayName": "Editor tweaks (comment move-down + indent-aware arrows/enter)",
+  "description": "cmd+/ comment & move down unless empty (indent-aware); up/down/enter indent-aware on empty lines; preserves goal column.",
+  "version": "0.2.4",
+  "publisher": "sam",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "sam.commentAndMoveDownUnlessEmpty",
+        "title": "Toggle Comment & Move Down (unless empty line)"
+      },
+      {
+        "command": "sam.cursorUpIndentAware",
+        "title": "Cursor Up (indent-aware on empty lines)"
+      },
+      {
+        "command": "sam.cursorDownIndentAware",
+        "title": "Cursor Down (indent-aware on empty lines)"
+      },
+      {
+        "command": "sam.smartEnter",
+        "title": "Smart Enter (indent-aware newline)"
+      }
+    ]
+  }
+}

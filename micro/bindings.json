@@ -1,0 +1,5 @@
+{
+    "AltShiftUp": "SelectUp",
+    "AltShiftDown": "SelectDown",
+    "Ctrl-u": "SelectToStartOfLine,Backspace"
+}

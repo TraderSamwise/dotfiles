@@ -1,0 +1,183 @@
+{
+    "window.commandCenter": true,
+    "workbench.colorTheme": "Monokai",
+    "typescript.updateImportsOnFileMove.enabled": "always",
+    "workbench.editor.wrapTabs": true,
+    "editor.fontSize": 11.5,
+    "eslint.validate": [
+        "javascript",
+        "javascriptreact",
+        "typescript",
+        "typescriptreact"
+    ],
+    "editor.defaultFormatter": "vscode.json-language-features", // fallback
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+    },
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[typescript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[javascriptreact]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[typescriptreact]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    },
+    "[jsonc]": {
+        "editor.defaultFormatter": "vscode.json-language-features",
+        "editor.formatOnSave": true
+    },
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+        }
+    },
+    // override eslint path
+    // "eslint.nodePath": "/Users/sam/.nvm/versions/node/v22.12.0/lib/node_modules",
+    "workbench.colorCustomizations": {
+        "activityBar.background": "#1E1E2E", // Left vertical bar
+        "activityBar.foreground": "#FFFFFF", // Icons in activity bar
+        "activityBar.inactiveForeground": "#888888", // Inactive icons
+        "activityBarBadge.background": "#FF4081", // Badge color (e.g. update count)
+        "sideBar.background": "#282C34", // Background of file explorer
+        "sideBar.foreground": "#D4D4D4", // Text color
+        "sideBarSectionHeader.background": "#3A3F4B", // Section header (like OPEN EDITORS)
+        "editorUnnecessaryCode.opacity": "#000000a0", // keep the fade (~63% opacity)
+        "editorUnnecessaryCode.border": "#00000000" // drop the underline
+    },
+    "files.autoSave": "onWindowChange",
+    "editor.tokenColorCustomizations": {
+        "textMateRules": [
+            {
+                "scope": [
+                    "variable.language.this"
+                ],
+                "settings": {
+                    "foreground": "#F92672" // 'this' red like keywords
+                }
+            },
+            {
+                "scope": [
+                    // "source", // all source code
+                    // "meta.embedded",
+                    // "variable",
+                    "variable.other",
+                    "variable.parameter",
+                    // "entity.name",
+                    // "entity.name.function",
+                    // "entity.name.type",
+                    // "entity.name.class",
+                    // "entity.name.tag",
+                    // "entity.other.attribute-name"
+                ],
+                "settings": {
+                    "foreground": "#fb961d" // Orange
+                },
+            },
+            {
+                "scope": [
+                    "entity.name.type",
+                    "support.type"
+                ],
+                "settings": {
+                    "fontStyle": "" // Remove underline, italic, bold, etc.
+                }
+            },
+            {
+                "scope": [
+                    "entity.name.tag"
+                ],
+                "settings": {
+                    "foreground": "#FFFFFF" // White
+                }
+            },
+            {
+                "scope": [
+                    "comment",
+                    "variable.language",
+                    "entity.name.type",
+                    "entity.name.type.class",
+                    "support.class",
+                    "support.type",
+                    "keyword",
+                    "storage",
+                    "entity.other.attribute-name",
+                    "entity.name.tag",
+                    "support.class.component.js",
+                    "support.class.component.tsx",
+                    "support.class.component.jsx",
+                    "markup.italic",
+                    "markup.quote",
+                    "keyword",
+                    "storage",
+                    "storage.type",
+                    "storage.modifier",
+                    "storage.type.js",
+                    "storage.type.ts",
+                    "storage.type.const",
+                    "keyword.control",
+                    "keyword.control.import",
+                    "keyword.control.export",
+                    "keyword.control.from"
+                ],
+                "settings": {
+                    "fontStyle": ""
+                }
+            }
+        ]
+    },
+    "eslint.useFlatConfig": false,
+    "multiCommand.commands": [
+        {
+            "command": "extension.multiCommand.commentAndMoveDown",
+            "sequence": [
+                "editor.action.commentLine",
+                "cursorDown"
+            ]
+        }
+    ],
+    "javascript.preferences.importModuleSpecifier": "non-relative",
+    "typescript.preferences.importModuleSpecifier": "non-relative",
+    "search.exclude": {
+        "**/trading_platform/**": true,
+        "**/charting_library/**": true,
+        "**/thirdparty/**": true,
+    },
+    "editor.linkedEditing": true,
+    "workbench.activityBar.location": "top",
+    "periscope.rgMenuActions": [
+        {
+            "label": "JS/TS",
+            "value": "--type-add 'jsts:*.{js|ts|tsx|jsx}' -t jsts"
+        },
+    ],
+    "periscope.rgPath": "/opt/homebrew/bin/rg",
+    "eslint.workingDirectories": [
+        {
+            "directory": "apps/web"
+        }
+    ],
+    "eslint.experimental.useFlatConfig": true,
+    "window.autoDetectColorScheme": false,
+    "editor.accessibilitySupport": "off",
+    "editor.parameterHints.enabled": false,
+    "prettier.tabWidth": 4,
+    "leetcode.hint.configWebviewMarkdown": false,
+    "leetcode.workspaceFolder": "/Users/sam/.leetcode",
+    "leetcode.hint.setDefaultLanguage": false,
+    "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "editor.suggest.localityBonus": true,
+    "editor.suggestSelection": "recentlyUsedByPrefix",
+    "editor.snippetSuggestions": "bottom",
+    "ruff.lint.ignore": ["F401", "F841"]
+}
