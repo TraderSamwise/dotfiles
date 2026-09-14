@@ -70,7 +70,7 @@ if [ -d /Applications/Rectangle.app ]; then
   else
     echo "!! Rectangle import failed; its previous settings are unchanged" >&2
   fi
-  open -a Rectangle
+  open -a Rectangle || echo "!! could not reopen Rectangle; open it by hand" >&2
 else
   echo "!! Rectangle.app not installed; skipped its shortcuts (brew install --cask rectangle, then rerun)" >&2
 fi
