@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+import re
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+# Shared first, then machine-private: the same two files Claude Code loads.
+SOURCES = (HOME / ".claude" / "CLAUDE.md", HOME / "CLAUDE.md")
+TARGET = HOME / ".codex" / "config.toml"
+
+START = f"# BEGIN managed: {HOME}/CLAUDE.md -> Codex developer_instructions"
+END = f"# END managed: {HOME}/CLAUDE.md -> Codex developer_instructions"
+SYNC_START = "<!-- codex:sync-start -->"
+SYNC_END = "<!-- codex:sync-end -->"
+HEADER = "# Global Agent Instructions"
+GENERATED_REMINDER = (
+    "Do not edit this developer instructions block directly. It is generated from the "
+    f"shared regions of `{HOME}/.claude/CLAUDE.md` (portable rules) and `{HOME}/CLAUDE.md` "
+    f"(machine-private rules). Edit those files, then run `{HOME}/.local/bin/sync-codex-claude`."
+)
+
+SYNC_REGION_RE = re.compile(
+    re.escape(SYNC_START) + r"\n(.*?)\n[ \t]*" + re.escape(SYNC_END),
+    re.S,
+)
+
+STALE_BLOCK_RE = re.compile(
+    r"# BEGIN managed: .+?/CLAUDE\.md -> Codex developer_instructions"
+    r".*?# END managed: .+?/CLAUDE\.md -> Codex developer_instructions\n?",
+    re.S,
+)
+
+
+def toml_multiline_basic(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    return f'"""\n{escaped.rstrip()}\n"""'
+
+
+def shared_region(source: Path) -> str:
+    text = source.read_text()
+    match = SYNC_REGION_RE.search(text)
+    if not match:
+        sys.exit(
+            f"error: no {SYNC_START} / {SYNC_END} region found in {source}.\n"
+            "Refusing to sync: without markers the whole file would leak into Codex.\n"
+            "Wrap the Codex-shared sections in those markers and rerun."
+        )
+    body = match.group(1).strip()
+    if not body:
+        sys.exit(f"error: the {SYNC_START} region in {source} is empty.")
+    return body
+
+
+def source_for_codex() -> tuple[str, list[Path]]:
+    present = [s for s in SOURCES if s.exists()]
+    if not present:
+        sys.exit(f"error: neither {SOURCES[0]} nor {SOURCES[1]} exists; nothing to sync.")
+    bodies = [shared_region(s) for s in present]
+    return f"{HEADER}\n\n{GENERATED_REMINDER}\n\n" + "\n\n".join(bodies) + "\n", present
+
+
+def replace_managed_block(config: str, block: str) -> str:
+    if START in config and END in config:
+        before, rest = config.split(START, 1)
+        _, after = rest.split(END, 1)
+        return before.rstrip() + "\n\n" + block + "\n\n" + after.lstrip()
+    # Strip any stale block referencing a different machine's HOME.
+    config = STALE_BLOCK_RE.sub("", config)
+    return block + "\n\n" + config.lstrip()
+
+
+def main() -> None:
+    instructions, present = source_for_codex()
+    block = (
+        f"{START}\n"
+        f"developer_instructions = {toml_multiline_basic(instructions)}\n"
+        f"{END}"
+    )
+    current = TARGET.read_text() if TARGET.exists() else ""
+    TARGET.write_text(replace_managed_block(current, block))
+    synced = len(instructions.splitlines())
+    total = sum(len(s.read_text().splitlines()) for s in present)
+    names = " + ".join(str(s) for s in present)
+    print(f"Synced {synced}/{total} lines of {names} into {TARGET}")
+
+
+if __name__ == "__main__":
+    main()
