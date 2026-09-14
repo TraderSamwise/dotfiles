@@ -7,12 +7,14 @@ DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 WITH_BREW=1
 WITH_VSCODE=1
+WITH_MACOS=0
 
 for arg in "$@"; do
   case "$arg" in
     --no-brew) WITH_BREW=0 ;;
     --no-vscode) WITH_VSCODE=0 ;;
-    -h|--help) echo "usage: $0 [--no-brew] [--no-vscode]"; exit 0 ;;
+    --macos) WITH_MACOS=1 ;;
+    -h|--help) echo "usage: $0 [--no-brew] [--no-vscode] [--macos]"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -79,11 +81,26 @@ link tmux/tmux.conf "$HOME/.tmux.conf"
 link ripgrep/ripgreprc "$HOME/.ripgreprc"
 link micro/settings.json "$HOME/.config/micro/settings.json"
 link micro/bindings.json "$HOME/.config/micro/bindings.json"
+link bash/bashrc "$HOME/.bashrc"
+link bash/bash_profile "$HOME/.bash_profile"
+link bash/profile "$HOME/.profile"
+link ghostty/config "$HOME/.config/ghostty/config"
+link ghostty/config "$HOME/Library/Application Support/com.cmuxterm.app/config.ghostty"
+link cmux/cmux.json "$HOME/.config/cmux/cmux.json"
+link nvim "$HOME/.config/nvim"
+link vim/vimrc "$HOME/.vimrc"
+link htop/htoprc "$HOME/.config/htop/htoprc"
+link watchman/watchman-config.json "$HOME/.watchman-config.json"
+link opencode/opencode.json "$HOME/.config/opencode/opencode.json"
+link bin/git-merge "$HOME/.local/bin/git-merge"
+link bin/cs "$HOME/.local/bin/cs"
 
 clone https://github.com/ohmyzsh/ohmyzsh.git "$HOME/.oh-my-zsh"
 clone https://github.com/zsh-users/zsh-autosuggestions "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
 clone https://github.com/zsh-users/zsh-syntax-highlighting "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
 clone https://github.com/bhilburn/powerlevel9k "$HOME/.oh-my-zsh/custom/themes/powerlevel9k"
+clone https://github.com/VundleVim/Vundle.vim "$HOME/.vim/bundle/Vundle.vim"
+clone https://github.com/Shougo/neobundle.vim "$HOME/.vim/bundle/neobundle.vim"
 
 if git -C "$DOTFILES" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$DOTFILES" config core.hooksPath .githooks
@@ -106,6 +123,10 @@ fi
 
 if [ "$WITH_VSCODE" = 1 ]; then
   "$DOTFILES/vscode/bootstrap.sh"
+fi
+
+if [ "$WITH_MACOS" = 1 ]; then
+  "$DOTFILES/macos/defaults.sh"
 fi
 
 cat <<EOF

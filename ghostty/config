@@ -1,0 +1,22 @@
+cursor-style = block
+# In-app visor disabled — ctrl+` is now a Hammerspoon whole-app toggle, which
+# survives cmux's main thread being saturated by many live surfaces.
+# keybind = global:ctrl+grave_accent=toggle_quick_terminal
+# quick-terminal-position = top
+# quick-terminal-animation-duration = 0
+theme = Kilobit
+unfocused-split-opacity = 0.6
+keybind = super+equal=increase_font_size:0.2
+keybind = super+minus=decrease_font_size:0.2
+keybind = ctrl+j=text:\x1b[13;2u
+keybind = super+left=text:\x1bOH
+keybind = super+right=text:\x1bOF
+# cmd+shift+arrows: select to line start/end. These two chords are otherwise
+# unbound in every pane, so nothing is displaced. nvim reads them as <S-Home>/
+# <S-End> and keymodel=startsel turns them into a selection.
+keybind = super+shift+arrow_left=text:\x1b[1;2H
+keybind = super+shift+arrow_right=text:\x1b[1;2F
+
+# Option sends Alt instead of composing ¬ ø ˙. Gives word-motion (opt+arrows)
+# and word-selection (opt+shift+arrows) in zsh and in micro. Terminal only.
+macos-option-as-alt = true

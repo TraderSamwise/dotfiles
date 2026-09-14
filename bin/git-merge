@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+# Usage: ./merge_master_into.sh <target-branch>
+# Example: ./merge_master_into.sh preview
+
+set -euo pipefail
+
+# Check if a branch argument was provided
+if [ -z "${1:-}" ]; then
+  echo "Usage: $0 <target-branch>"
+  exit 1
+fi
+
+TARGET_BRANCH="$1"
+SOURCE_BRANCH="master"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+cd "$REPO_ROOT"
+
+sync_submodules() {
+  git submodule sync --recursive >/dev/null
+  git submodule update --init --recursive
+
+  git submodule foreach --recursive '
+    branch="$(git config -f "$toplevel/.gitmodules" "submodule.$name.branch" || true)"
+    [ -n "$branch" ] || exit 0
+    git show-ref --verify --quiet "refs/remotes/origin/$branch" || exit 0
+
+    recorded="$(git -C "$toplevel" rev-parse "HEAD:$sm_path")"
+    git checkout -q "$branch" 2>/dev/null || git checkout -q -B "$branch" "origin/$branch"
+
+    current="$(git rev-parse HEAD)"
+    [ "$current" = "$recorded" ] && exit 0
+
+    if git merge-base --is-ancestor "$current" "$recorded"; then
+      git merge --ff-only "$recorded" >/dev/null
+    else
+      git checkout -q "$recorded"
+    fi
+  '
+}
+
+switch_back_to_source() {
+  if [ "$(git branch --show-current)" != "$SOURCE_BRANCH" ]; then
+    git checkout "$SOURCE_BRANCH" || exit 1
+  fi
+  sync_submodules
+}
+
+# Fetch the latest changes
+git fetch origin
+
+# Switch to the target branch
+git checkout "$TARGET_BRANCH" || { echo "Error: Failed to checkout $TARGET_BRANCH"; exit 1; }
+sync_submodules
+
+# Pull latest changes from origin/<target>
+git pull origin "$TARGET_BRANCH" || { echo "Error: Failed to pull $TARGET_BRANCH"; exit 1; }
+sync_submodules
+
+# Merge source branch into target
+if ! git merge origin/"$SOURCE_BRANCH" --no-edit; then
+  echo "Merge conflicts detected! Aborting merge."
+  git merge --abort || true
+  switch_back_to_source
+  exit 1
+fi
+sync_submodules
+
+# Check for merge conflicts
+if [[ $(git ls-files -u | wc -l) -gt 0 ]]; then
+  echo "Merge conflicts detected! Aborting merge."
+  git merge --abort
+  switch_back_to_source
+  exit 1
+fi
+
+# Push merged branch back to origin
+git push origin "$TARGET_BRANCH" || { echo "Error: Failed to push $TARGET_BRANCH"; exit 1; }
+
+# Switch back to source branch
+switch_back_to_source
+
+echo "Successfully merged $SOURCE_BRANCH into $TARGET_BRANCH, pushed to origin, and switched back to $SOURCE_BRANCH."

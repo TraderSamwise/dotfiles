@@ -1,31 +1,95 @@
 # dotfiles
 
-Portable shell, git, and editor config for macOS. Public on purpose: nothing
-machine-private lives here.
+Portable shell, git, terminal, and editor config for macOS. Public on purpose:
+nothing machine-private lives here.
 
 ## Install
 
 ```bash
 git clone https://github.com/TraderSamwise/dotfiles ~/cs/dotfiles
-~/cs/dotfiles/bootstrap.sh            # --no-brew, --no-vscode to skip those steps
+~/cs/dotfiles/bootstrap.sh            # --no-brew, --no-vscode to skip those steps; --macos to apply macOS defaults
 exec zsh
 ```
 
 `bootstrap.sh` is idempotent. It installs Homebrew if missing, clones oh-my-zsh
-with its plugins and the powerlevel9k theme, symlinks the files below into
-`$HOME` (moving anything it replaces to `~/.dotfiles-backup/<stamp>/`), runs
-`brew bundle`, installs `xkcdpass` via `uv` when `uv` is available, and restores
-VS Code (the `editor-tweaks` extension build needs `node`).
+with its plugins and the powerlevel9k theme, clones Vundle and NeoBundle for vim,
+symlinks the files below into `$HOME` (moving anything it replaces to
+`~/.dotfiles-backup/<stamp>/`), runs `brew bundle`, installs `xkcdpass` via `uv` when `uv` is available, and
+restores VS Code (the `editor-tweaks` extension build needs `node`). With
+`--macos` it also runs `macos/defaults.sh`.
 
 | Repo path | Linked to |
 |-----------|-----------|
 | `zsh/zshenv`, `zsh/zprofile`, `zsh/zlogin`, `zsh/zshrc` | `~/.zshenv`, `~/.zprofile`, `~/.zlogin`, `~/.zshrc` |
+| `bash/bashrc`, `bash/bash_profile`, `bash/profile` | `~/.bashrc`, `~/.bash_profile`, `~/.profile` |
 | `git/config`, `git/ignore` | `~/.config/git/config`, `~/.config/git/ignore` |
+| `ghostty/config` | `~/.config/ghostty/config` and `~/Library/Application Support/com.cmuxterm.app/config.ghostty` (cmux reads the Ghostty config) |
+| `cmux/cmux.json` | `~/.config/cmux/cmux.json` |
+| `nvim/` (LazyVim) | `~/.config/nvim` |
+| `vim/vimrc` | `~/.vimrc` |
 | `tmux/tmux.conf` | `~/.tmux.conf` |
 | `ripgrep/ripgreprc` | `~/.ripgreprc` |
 | `micro/settings.json`, `micro/bindings.json` | `~/.config/micro/` |
+| `htop/htoprc` | `~/.config/htop/htoprc` |
+| `watchman/watchman-config.json` | `~/.watchman-config.json` (`WATCHMAN_CONFIG_FILE` in `zsh/zshrc`) |
+| `opencode/opencode.json` | `~/.config/opencode/opencode.json` |
+| `bin/git-merge`, `bin/cs` | `~/.local/bin/git-merge`, `~/.local/bin/cs` |
 | `vscode/` | VS Code User dir — see [`vscode/README.md`](vscode/README.md) |
 | `Brewfile` | `brew bundle` |
+| `macos/defaults.sh` | run by `bootstrap.sh --macos` |
+
+## Keyboard
+
+Keys that differ from the defaults, and the file that sets each.
+
+| Key | Does | Set in |
+|-----|------|--------|
+| ⌥← / ⌥→ | jump a word in zsh, micro and nvim | `ghostty/config` (`macos-option-as-alt`); nvim side in `nvim/lua/config/keymaps.lua` |
+| ⌘← / ⌘→ | Home / End | `ghostty/config` |
+| ⌘⇧← / ⌘⇧→ | select to line start / end | `ghostty/config`; nvim turns them into a selection via `keymodel` in `nvim/lua/config/options.lua` |
+| ⌃J | newline in Claude Code (sends Shift+Enter) | `ghostty/config` |
+| ⌘= / ⌘− | font size up / down | `ghostty/config` |
+| ⌘⌫ | delete to line start (Ghostty sends `^U`) | `zsh/zshrc` (`bindkey '^U' backward-kill-line`) |
+| ⌘⌥Space | Spotlight, leaving ⌘Space for Raycast | `macos/defaults.sh` |
+
+Image paste in Claude Code: ⌘V works in cmux, which saves the clipboard image to
+`$TMPDIR/clipboard-*.png` and pastes the path. In plain Ghostty, Terminal or
+iTerm, use ⌃V inside Claude Code.
+
+The powerlevel9k prompt needs a Powerline font in terminals other than Ghostty,
+which bundles its own glyphs: `brew install --cask font-meslo-for-powerlevel10k`.
+
+## macOS
+
+`macos/defaults.sh` is opt-in (`bootstrap.sh --macos`, or run it directly). It
+sets fast key repeat with press-and-hold off, natural scrolling off, all file
+extensions shown, Dark mode, tap to click, three-finger horizontal swipe, an
+auto-hiding Dock without launch animation or Space reordering, Finder path bar
+and list view with search scoped to the current folder and external drives on
+the desktop, screenshots saved to `~/Desktop/screenshots` in window mode, reduced
+transparency, and Spotlight on ⌘⌥Space. Key repeat and trackpad settings apply
+after logging out; the script restarts Dock, Finder and SystemUIServer. Writing reduced transparency needs Full
+Disk Access for the terminal; the script prints a warning when it cannot.
+
+### Swapping ⌘ and ⌥ on an external keyboard
+
+This is per device, so the script does not set it. Get the keyboard's hex
+`VendorID` and `ProductID` from `hidutil list --matching keyboard`, convert each
+to decimal (`printf '%d\n' 0x05ac`), then:
+
+```bash
+defaults -currentHost write -g com.apple.keyboard.modifiermapping.<vendor>-<product>-0 -array \
+  '<dict><key>HIDKeyboardModifierMappingSrc</key><integer>30064771298</integer><key>HIDKeyboardModifierMappingDst</key><integer>30064771299</integer></dict>' \
+  '<dict><key>HIDKeyboardModifierMappingSrc</key><integer>30064771299</integer><key>HIDKeyboardModifierMappingDst</key><integer>30064771298</integer></dict>' \
+  '<dict><key>HIDKeyboardModifierMappingSrc</key><integer>30064771302</integer><key>HIDKeyboardModifierMappingDst</key><integer>30064771303</integer></dict>' \
+  '<dict><key>HIDKeyboardModifierMappingSrc</key><integer>30064771303</integer><key>HIDKeyboardModifierMappingDst</key><integer>30064771302</integer></dict>'
+```
+
+Each code is `0x7000000E0` plus the HID modifier: `…298` left ⌥, `…299` left ⌘,
+`…302` right ⌥, `…303` right ⌘. Alternatively set it once in System Settings >
+Keyboard > Keyboard Shortcuts > Modifier Keys and read it back with
+`defaults -currentHost read -g | grep modifiermapping`. A `defaults` write takes
+effect at the next login.
 
 ## Machine-private config
 
@@ -38,6 +102,7 @@ gitignored):
 | `~/.zprofile.local` | login shells | login-only env |
 | `~/.zshrc.local` | interactive shells, last | aliases, conda, extra PATH, other tokens |
 | `~/.gitconfig` | git, after `~/.config/git/config` | `[user]`, credential helpers |
+| `~/.config/nvim/lua/plugins/private/init.lua` | lazy.nvim (gitignored) | plugin specs from private repos |
 
 `~/.gitconfig` must exist: when it is absent, `git config --global` writes into
 the XDG file, which is this repo. `bootstrap.sh` creates it.
@@ -47,6 +112,8 @@ the XDG file, which is this repo. `bootstrap.sh` creates it.
 Edit files in this repo; the symlinks make changes live. Installers that append
 to `~/.zshrc` (`conda init`, bun) and `sed -i` on a linked file write into this
 repo or replace the symlink: move such blocks into `~/.zshrc.local`, and check
-`git status` here after installing things. A `pre-commit` hook
+`git status` here after installing things. htop saves settings by renaming a
+temp file over `~/.config/htop/htoprc`, which replaces the symlink: copy that
+file into `htop/htoprc`, then rerun `bootstrap.sh`. A `pre-commit` hook
 (`.githooks/`, enabled by `bootstrap.sh`) runs `gitleaks` and refuses the commit
 if it finds a credential or if `gitleaks` is not installed.
