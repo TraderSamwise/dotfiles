@@ -1,0 +1,866 @@
+#!/usr/bin/env python3
+"""
+Sam's queue: what he asked for, what state it is in, and what proves it.
+
+Why this exists rather than an agent keeping a list in its head or in a chat
+message: on 2026-08-26 an agent reported a page reorder as shipped when only
+half of it had been done, and reported a capacity field as existing when it was
+two clicks deep on another tab. Both claims were made from a commit rather than
+from the running product, and neither was written anywhere Sam could check.
+
+So the state lives on disk, the history is append-only, and the transition that
+matters — `done` — refuses to run without evidence.
+
+There used to be three states after `doing`: `landed` for a commit, `shipped`
+for something a person could reach, `verified` for Sam saying it did what he
+asked. He collapsed them on 2026-09-03: "Shipped and landed are the same thing
+to me. Once it's done it's done, move on. I'll report if there is a follow up."
+So there is one, and the evidence requirement moved onto it — the ceremony was
+his to drop, the proof was never the ceremony.
+
+Nor is the queue a ticket system. On 2026-09-04 items were being held open
+waiting for a deploy so that proof could be taken off the running product, and
+Sam ruled: "queue tasks should not wait on deployment UNLESS there is
+uncertainty of the fix to a high degree. queueing is to just get shit done.
+ill requeue additional fixes if needed." So proof is whatever actually settles
+the question. For most code it is a gate you PROVE-FAILED — broke the
+assertion, watched it fail, restored it, watched it pass — which is a stronger
+claim than any deploy. Reach for the running product only when the fix cannot
+be established without it: something rendered, something deployed, a row in a
+database. Never park an item to wait for a release.
+
+Storage, one directory per repo, outside every repo because a queue is Sam's
+personal working context and never a committed project file:
+
+    ~/cs/docs/agent-queue/<repo-key>/log.jsonl   append-only, the truth
+    ~/cs/docs/agent-queue/<repo-key>/QUEUE.md    derived, human-readable
+
+`repo-key` is derived the same way agent-memory derives it, so every worktree of
+a repo shares one queue rather than each getting its own silo.
+
+An item belongs to the agent that queued it and to the worktree it was queued
+in. Both come from the environment — the runtime's own session id and git —
+rather than from a flag, so an agent cannot forget to say who it is or work
+another branch's list by accident. Ids are numbered per agent (`pzjidx-3`) and wrap at
+99. Another agent's item is refused; `queue hand` is the only way work changes
+hands, and that is Sam's call.
+
+There are three questions and no fourth: what is mine here (`next`), what is
+queued here (`ls`), and what is queued anywhere in this project (`--project`).
+Across projects is not one of them, and cannot be asked.
+
+    queue add "<his words, verbatim>"      capture, before anything else
+    queue next [--anyone]                  start the oldest todo item here
+    queue hand <id> --to <agent>           SAM ONLY: move it to another agent
+    queue ls [--state S] [--mine] [--project]
+    queue show <id>                        one item and its whole history
+    queue start <id> --by <who>
+    queue done  <id> --commit <sha> --proof "<evidence>"
+    queue block <id> --why "..."
+    queue drop  <id> --why "..."
+    queue note  <id> "..."
+    queue sync                             rewrite QUEUE.md from the log
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path.home() / "cs" / "docs" / "agent-queue"
+
+# The lifecycle. Each state names what has been established, never what somebody
+# intends.
+#
+# Three, and Sam named them on 2026-09-04: "todo, doing, done. thats it. and
+# doing is when actively coding it or if we have to push debug logs or if there
+# is a real need for verification. otherwise done is done."
+#
+# So `doing` is not a holding pen. It means somebody has their hands on it —
+# writing it, or waiting on something that genuinely cannot be settled yet.
+# The three below it are exits rather than steps: `blocked` is waiting on Sam,
+# `wontdo` is an agent proposing to abandon something and still listing until
+# he rules, `dropped` is his call alone.
+STATES = (
+    "todo",
+    "doing",
+    "done",
+    "blocked",
+    "wontdo",
+    "dropped",
+)
+
+# What the log may still hold from before 2026-09-03, and what each becomes on
+# the way in. The log is append-only, so old rows are read forward rather than
+# rewritten — `landed` and `shipped` were both "done", and `verified` was Sam
+# confirming a thing that was already done.
+RETIRED = {
+    "landed": "done",
+    "shipped": "done",
+    "verified": "done",
+    # 2026-09-04: "todo, doing, done. thats it."
+    "queued": "todo",
+}
+
+# What may follow what. A transition absent from here is refused, so nothing can
+# skip from "todo" to "done" — an item nobody started is an item nobody did.
+TRANSITIONS: dict[str, tuple[str, ...]] = {
+    "todo": ("doing", "blocked", "wontdo", "dropped"),
+    "doing": ("done", "blocked", "wontdo", "dropped", "todo"),
+    # Reopened by Sam saying so, which is what a follow-up is — straight back
+    # to the list, not through `doing`, because he reports one before anybody
+    # has picked it up.
+    "done": ("todo", "doing", "blocked"),
+    "blocked": ("todo", "doing", "wontdo", "dropped"),
+    # An agent's proposal to abandon something. It STILL LISTS until Sam rules
+    # on it, which is the whole point: the tool must not give an agent a way to
+    # make an inconvenient request disappear.
+    "wontdo": ("dropped", "todo", "doing"),
+    "dropped": ("todo",),
+}
+
+# Evidence each transition must carry. The point of the whole tool, and the part
+# that did NOT get simpler when the states did: `done` wants the commit AND
+# something that was actually run, because the failure this file exists to stop
+# was a claim made from a commit alone.
+REQUIRED: dict[str, str] = {
+    "doing": "by",
+    "done": "commit",
+    "blocked": "why",
+    "wontdo": "why",
+    "dropped": "why",
+}
+
+# Fields a transition needs beyond the first. `done` is the only one.
+ALSO_REQUIRED: dict[str, tuple[str, ...]] = {"done": ("proof", "clauses")}
+
+MARK = {
+    "todo": "·",
+    "doing": "▸",
+    "done": "✓",
+    "blocked": "⊘",
+    "wontdo": "?",
+    "dropped": "✗",
+}
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# Where each runtime stamps its session, in the order they are trusted. Aimux
+# hands out a whole handle; everything else gives a uuid, trimmed to six
+# characters so a Claude or Codex agent reads like an aimux one.
+RUNTIME_IDS = (
+    ("AIMUX_SESSION_ID", ""),
+    ("CLAUDE_CODE_SESSION_ID", "claude"),
+    ("CODEX_SESSION_ID", "codex"),
+    ("CODEX_THREAD_ID", "codex"),
+)
+STEM_LEN = 6
+
+
+def handle() -> str:
+    """
+    Which agent is running this, asked rather than declared.
+
+    Ownership needs no flag and no discipline: an agent cannot forget to say
+    who it is, and cannot claim to be somebody else by omission. Outside aimux
+    that used to mean every Claude and Codex agent answering to "sam" and
+    sharing one run of ids. Sam's own shell is still "sam".
+    """
+    for var, tool in RUNTIME_IDS:
+        raw = (os.environ.get(var) or "").strip()
+        if not raw:
+            continue
+        if not tool:
+            return raw
+        stem = "".join(c for c in raw.lower() if c.isalnum())[:STEM_LEN]
+        if stem:
+            return f"{tool}-{stem}"
+    return "sam"
+
+
+def short(who: str) -> str:
+    """The half of a session id that is not the tool name — `claude-pzjidx` is pzjidx."""
+    return who.split("-", 1)[1] if "-" in who else who
+
+
+def worktree() -> str:
+    """
+    Which checkout of the project this is.
+
+    One store per project, because "what is queued for The Grand" is a real
+    question. But an agent works in one tree, and the work queued in another is
+    somebody else's branch — so the item records where it was raised and the
+    default view is here.
+    """
+    try:
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return Path(top).name if top else "global"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "global"
+
+
+def in_tree(item: dict) -> bool:
+    """Raised here — or before the tree was recorded, which is everywhere."""
+    return item.get("tree") in (worktree(), None)
+
+
+def here_key() -> str:
+    """The repo the caller is standing in, ignoring --repo."""
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return Path(common).parent.name
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "global"
+
+
+def repo_key() -> str:
+    """
+    Which queue this belongs to. Every worktree of a repo shares one.
+
+    There is no way to name a different one. A queue is the work of the project
+    you are standing in, and an agent that can address another project's queue
+    will eventually work it.
+    """
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return Path(common).parent.name
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Not in a repo: the ask is about the machine, the tooling, or Sam
+        # himself, and still needs somewhere to live.
+        return "global"
+
+
+def owner_of(item: dict) -> str | None:
+    """
+    Whose item this is, from the moment it was queued.
+
+    An agent owns what it captures. `None` is only ever an item from before
+    ownership existed, and those are free for anyone — rewriting history to
+    give them an owner would be inventing one.
+    """
+    if item.get("owner"):
+        return item["owner"]
+    # Items from before ownership existed: whoever last moved one is holding
+    # it. That is read from the log, not invented.
+    return item["evidence"].get("by")
+
+
+def paths(key: str) -> tuple[Path, Path]:
+    d = ROOT / key
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "log.jsonl", d / "QUEUE.md"
+
+
+def append(log: Path, event: dict) -> None:
+    """One line, one event, opened for append so concurrent agents interleave
+    safely rather than overwriting each other's work."""
+    with log.open("a", encoding="utf8") as fh:
+        fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
+def read_events(log: Path) -> list[dict]:
+    if not log.exists():
+        return []
+    out = []
+    for line in log.read_text(encoding="utf8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            # A half-written line from a killed process. Skipped rather than
+            # fatal: one bad line must not make the whole queue unreadable.
+            continue
+    return out
+
+
+def fold(events: list[dict]) -> dict[str, dict]:
+    """The current state of every item, replayed from the log."""
+    items: dict[str, dict] = {}
+    for e in events:
+        eid = e.get("id")
+        if not eid:
+            continue
+        if e.get("kind") == "add":
+            items[eid] = {
+                "id": eid,
+                "ask": e.get("ask", ""),
+                "state": "todo",
+                "added": e.get("at", ""),
+                "tags": e.get("tags", []),
+                "owner": e.get("by"),
+                "tree": e.get("tree"),
+                "history": [e],
+                "evidence": {},
+            }
+            continue
+        item = items.get(eid)
+        if not item:
+            continue
+        item["history"].append(e)
+        if e.get("kind") == "note":
+            continue
+        if e.get("kind") == "hand":
+            item["owner"] = e.get("to")
+            continue
+        state = RETIRED.get(e.get("state"), e.get("state"))
+        if state in STATES:
+            item["state"] = state
+            for field in ("by", "commit", "proof", "why"):
+                if e.get(field):
+                    item["evidence"][field] = e[field]
+    return items
+
+
+# Ids stay short enough to type and to say out loud, so they wrap rather than
+# climb. A number comes back round only once its item is finished with.
+ID_CEILING = 99
+CLOSED = ("done", "dropped")
+
+
+def next_id(events: list[dict], who: str) -> str:
+    """
+    The agent's next number: one past its last, wrapping at 99.
+
+    Monotonic while it can be, because reading a log is easier when the numbers
+    climb, and short forever, because `q147` is a number nobody says out loud.
+    A number is only reused once its item reached a state Sam closed —
+    `done` or `dropped`. Anything still in flight keeps its number.
+    """
+    stem = short(who)
+    items = fold(events)
+    mine = [
+        int(eid.rpartition("-")[2])
+        for eid in items
+        if eid.startswith(f"{stem}-") and eid.rpartition("-")[2].isdigit()
+    ]
+    busy = {
+        int(eid.rpartition("-")[2])
+        for eid, item in items.items()
+        if eid.startswith(f"{stem}-")
+        and eid.rpartition("-")[2].isdigit()
+        and item["state"] not in CLOSED
+    }
+    # A number that has never been used is always safer than one that has.
+    # Reuse is what lets a stale id in an agent's context mutate a different
+    # item, so spend every fresh number first and only then come back round.
+    used = set(mine)
+    for n in range(1, ID_CEILING + 1):
+        if n not in used:
+            return f"{stem}-{n}"
+    start = (max(mine) % ID_CEILING) + 1 if mine else 1
+    for step in range(ID_CEILING):
+        n = ((start - 1 + step) % ID_CEILING) + 1
+        if n not in busy:
+            prior = items.get(f"{stem}-{n}")
+            if prior:
+                closed_at = ""
+                for e in reversed(prior["history"]):
+                    if e.get("state") in CLOSED:
+                        closed_at = e.get("at", "")[:16].replace("T", " ")
+                        break
+                print(
+                    f"queue: reusing {stem}-{n}. It last held "
+                    f"\"{prior['ask'][:56]}\"" + (f", closed {closed_at}." if closed_at else ".")
+                    + "\n       That item stays in log.jsonl but leaves this view.",
+                    file=sys.stderr,
+                )
+            return f"{stem}-{n}"
+    sys.exit(
+        f"queue: {stem} has {ID_CEILING} items still open. Finish or drop some\n"
+        f"       before adding another — a queue this long is not a queue."
+    )
+
+
+def id_order(eid: str) -> tuple[int, str]:
+    """q10 after q2, and pzjidx-10 after pzjidx-2. String order puts both first."""
+    stem, _, tail = eid.rpartition("-")
+    if stem and tail.isdigit():
+        return (int(tail), stem)
+    digits = eid.lstrip("q")
+    return (int(digits), eid) if digits.isdigit() else (10**9, eid)
+
+
+def resolve(items: dict[str, dict], token: str) -> dict:
+    if token in items:
+        return items[token]
+    # A bare number means MINE — `queue done 7` is what somebody types, and the
+    # one queue it can safely mean is the caller's own.
+    if token.isdigit():
+        for candidate in (f"{short(handle())}-{token}", f"q{token}"):
+            if candidate in items:
+                return items[candidate]
+    # A number and somebody else's stem, spelled either way round.
+    hits = [k for k in items if k.endswith(f"-{token}") or k == f"q{token}"]
+    if len(hits) == 1:
+        return items[hits[0]]
+    if len(hits) > 1:
+        sys.exit(f"queue: {token!r} could be {', '.join(sorted(hits))}.")
+    sys.exit(f"queue: no item {token!r}. Try `queue ls`.")
+
+
+def wrap(text: str, width: int, indent: str = "") -> list[str]:
+    words, lines, line = text.split(), [], ""
+    for w in words:
+        if line and len(line) + 1 + len(w) > width:
+            lines.append(indent + line)
+            line = w
+        else:
+            line = f"{line} {w}".strip()
+    if line:
+        lines.append(indent + line)
+    return lines or [indent]
+
+
+# --------------------------------------------------------------------------
+# commands
+
+
+def cmd_add(args) -> None:
+    key = repo_key()
+    log, _ = paths(key)
+    events = read_events(log)
+    ask = args.ask.strip()
+    if not ask:
+        sys.exit("queue: an empty ask is not an ask.")
+    eid = next_id(events, handle())
+    append(
+        log,
+        {
+            "id": eid,
+            "kind": "add",
+            "at": now(),
+            "ask": ask,
+            "tags": args.tag or [],
+            "source": args.source or "sam",
+            "by": handle(),
+            "tree": worktree(),
+        },
+    )
+    rebuild(key)
+    print(f"{eid}  todo     {ask[:72]}")
+    print(f"        {ROOT / key / 'QUEUE.md'}")
+
+
+def cmd_move(args, state: str) -> None:
+    key = repo_key()
+    log, _ = paths(key)
+    events = read_events(log)
+    items = fold(events)
+    item = resolve(items, args.id)
+    was = item["state"]
+
+    if state not in TRANSITIONS.get(was, ()):
+        allowed = ", ".join(TRANSITIONS.get(was, ())) or "nothing"
+        sys.exit(
+            f"queue: {item['id']} is {was}; it cannot go straight to {state}.\n"
+            f"       From {was} it may go to: {allowed}.\n"
+            f"       Nothing is done that nobody started."
+        )
+
+    """
+    An agent owns what it queued, and only Sam moves work between agents.
+
+    Two agents on one item is two half-finished jobs and a commit each. The
+    usual reason another agent's item looks abandoned is that the other one is
+    still typing, so taking it is a decision rather than an inference.
+    """
+    held = owner_of(item)
+    if held and held != handle():
+        sys.exit(
+            f"queue: {item['id']} belongs to {held}, and you are {handle()}.\n"
+            f"       If Sam wants you on it: queue hand {item['id']} --to {handle()}"
+        )
+
+    # Who is doing it is not a question worth asking: the environment says.
+    if not getattr(args, "by", None):
+        args.by = handle()
+
+    needed = [REQUIRED[state]] if state in REQUIRED else []
+    needed += list(ALSO_REQUIRED.get(state, ()))
+    for need in needed:
+        if getattr(args, need, None):
+            continue
+        if need == "clauses":
+            sys.exit(
+                f"queue: done requires --clauses.\n\n"
+                f"       Sam asked for this, verbatim:\n\n"
+                + "\n".join("         " + ln for ln in (item.get("ask") or "").splitlines())
+                + "\n\n"
+                "       Read it again and enumerate EVERY requirement it contains,\n"
+                "       each with whether it is actually satisfied today. A long ask\n"
+                "       usually holds three to six, joined by and/also/plus.\n"
+                "       The failure this flag exists to stop: one clause lands, the\n"
+                "       proof is entirely true about that clause, and the rest is\n"
+                "       silently reported as done.\n\n"
+                "       queue done ID --commit SHA --proof '...' \\\n"
+                "         --clauses '1 supervisor lane in data: DONE (aimux ps shows lane.kind=supervisor)\n"
+                "                    2 visible in the TUI he uses: NOT DONE\n"
+                "                    3 promote an existing agent: NOT DONE'\n\n"
+                "       If any clause is NOT DONE this item is not done. Leave it in\n"
+                "       doing, or queue add the remainder as its own item and say so.\n"
+            )
+        sys.exit(
+            f"queue: {state} requires --{need}.\n"
+            + (
+                "       Proof is a thing you RAN and what it answered. A gate you\n"
+                "       prove-failed, a test and its count, a live API response, a\n"
+                "       database row, a screenshot you looked at.\n"
+                "       A commit sha is not proof: the whole reason this tool\n"
+                "       exists is a claim made from one.\n"
+                "       Do NOT wait for a deploy to say this. Take proof off the\n"
+                "       running product only when nothing else settles it.\n"
+                if need == "proof"
+                else ""
+            )
+        )
+
+    # A clause list that admits an unmet requirement is not a done item. The
+    # tool refuses rather than trusting the author to notice their own words.
+    if state == "done":
+        said = (getattr(args, "clauses", "") or "")
+        unmet = [
+            ln.strip()
+            for ln in said.splitlines()
+            if any(m in ln.upper() for m in ("NOT DONE", "NOT SATISFIED", "MISSING", "PARTIAL", "TODO"))
+        ]
+        if unmet:
+            sys.exit(
+                "queue: --clauses says a requirement is not met, so this is not done:\n\n"
+                + "\n".join("         " + u for u in unmet)
+                + "\n\n"
+                "       Leave it in doing, or capture the remainder with queue add and\n"
+                "       tell Sam what you split off. Do not close over his own words.\n"
+            )
+
+    event = {"id": item["id"], "kind": "move", "at": now(), "state": state}
+    for field in ("by", "commit", "proof", "why", "clauses"):
+        value = getattr(args, field, None)
+        if value:
+            event[field] = value
+    append(log, event)
+    rebuild(key)
+
+    detail = event.get("proof") or event.get("commit") or event.get("why") or event.get("by") or ""
+    print(f"{item['id']}  {was} → {state}   {detail[:70]}")
+    if state == "wontdo":
+        print("        Proposed only. It stays on the list until Sam rules on it:")
+        print(f"        queue drop {item['id']} --why '...'   or   queue requeue {item['id']}")
+    if state == "dropped":
+        print("        Dropped. If you are not Sam, this was not yours to decide —")
+        print(f"        `queue wontdo {item['id']} --why '...'` is the agent's path.")
+
+
+def cmd_note(args) -> None:
+    key = repo_key()
+    log, _ = paths(key)
+    items = fold(read_events(log))
+    item = resolve(items, args.id)
+    append(log, {"id": item["id"], "kind": "note", "at": now(), "text": args.text})
+    rebuild(key)
+    print(f"{item['id']}  noted")
+
+
+def cmd_ls(args) -> None:
+    keys = [repo_key()]
+    shown = 0
+    for key in keys:
+        log, _ = paths(key)
+        items = fold(read_events(log))
+        rows = [i for i in items.values() if not args.state or i["state"] == args.state]
+        # Here, unless asked for the whole project. Work raised in another
+        # checkout is another branch's, and reading it as a list to work
+        # through is how an agent ends up on somebody else's job.
+        if not args.project:
+            rows = [i for i in rows if in_tree(i)]
+        if args.mine:
+            rows = [i for i in rows if owner_of(i) in (handle(), None)]
+        if not args.state and not args.everything:
+            rows = [i for i in rows if i["state"] not in ("done", "dropped")]
+        if not rows:
+            continue
+        if len(keys) > 1:
+            print(f"\n{key}")
+        order = {s: n for n, s in enumerate(STATES)}
+        for item in sorted(rows, key=lambda i: (order.get(i["state"], 9), id_order(i["id"]))):
+            shown += 1
+            where = item.get("tree")
+            who = owner_of(item)
+            # The id already names the owner for anything queued since; only a
+            # legacy item needs saying out loud.
+            tag = f"[{who}] " if who and not item["id"].startswith(short(who)) else ""
+            if args.project and where and where != worktree():
+                tag = f"({where}) {tag}"
+            head = f"  {MARK[item['state']]} {item['id']:<12} {item['state']:<8}{tag}"
+            body = wrap(item["ask"], 84)
+            print(head + body[0].strip())
+            for line in body[1:]:
+                print(" " * len(head) + line.strip())
+    if shown == 0:
+        print(
+            f"Nothing outstanding in {worktree()}."
+            if not args.project
+            else f"Nothing outstanding in {repo_key()}."
+        )
+
+
+def cmd_hand(args) -> None:
+    """
+    Sam moving work from one agent to another.
+
+    The only way ownership changes. It is a separate verb rather than a flag on
+    `start` so that a takeover is always a deliberate act with a name on it, and
+    reads as one in the log.
+    """
+    key = repo_key()
+    log, _ = paths(key)
+    items = fold(read_events(log))
+    item = resolve(items, args.id)
+    was = owner_of(item) or "nobody"
+    append(log, {"id": item["id"], "kind": "hand", "at": now(), "to": args.to, "from": was})
+    rebuild(key)
+    print(f"{item['id']}  {was} → {args.to}")
+
+
+def cmd_next(args) -> None:
+    """
+    The one command an agent should run to find work.
+
+    `ls` is a view and it tempted an agent into treating six projects as one
+    list. This takes the oldest unclaimed item in THIS repo and claims it in the
+    same breath, so "what should I do next" cannot answer with somebody else's
+    job.
+    """
+    key = repo_key()
+    me = handle()
+    log, _ = paths(key)
+    items = fold(read_events(log))
+    free = [
+        i
+        for i in items.values()
+        if i["state"] == "todo"
+        and in_tree(i)
+        and (args.anyone or owner_of(i) in (me, None))
+    ]
+    if not free:
+        print(f"Nothing queued for {me} in {worktree()}.")
+        for item in sorted(items.values(), key=lambda i: id_order(i["id"])):
+            if item["state"] != "todo":
+                continue
+            if not in_tree(item):
+                print(f"  {item['id']} was raised in {item.get('tree')}.")
+            elif owner_of(item):
+                print(f"  {item['id']} is {owner_of(item)}'s.")
+        return
+    item = sorted(free, key=lambda i: id_order(i["id"]))[0]
+    append(
+        log,
+        {"id": item["id"], "kind": "move", "at": now(), "state": "doing", "by": me},
+    )
+    rebuild(key)
+    print(f"{item['id']}  todo → doing   {me}")
+    for line in wrap(item["ask"], 84):
+        print("  " + line.strip())
+
+
+def prior_generations(events: list[dict], eid: str, current: list[dict]) -> list[dict]:
+    """
+    Earlier items that held this id before it was reused.
+
+    Ids wrap at 99 and come back round once an item is closed, so a number can
+    have carried more than one ask. fold() keeps only the newest, which is right
+    for "what is this now" and wrong for "what did I close yesterday". This
+    reads the raw log so a closure never becomes unreachable just because its
+    number was handed on.
+    """
+    first_current = current[0].get("at") if current else None
+    gens: list[dict] = []
+    open_gen: dict | None = None
+    for e in events:
+        if e.get("id") != eid:
+            continue
+        if first_current and e.get("at", "") >= first_current:
+            break
+        if e.get("kind") == "add":
+            if open_gen:
+                gens.append(open_gen)
+            open_gen = {"added": e.get("at", ""), "ask": e.get("ask", ""), "state": ""}
+            continue
+        if open_gen and e.get("state"):
+            open_gen["state"] = RETIRED.get(e.get("state"), e.get("state"))
+    if open_gen:
+        gens.append(open_gen)
+    return gens
+
+
+def cmd_show(args) -> None:
+    key = repo_key()
+    log, _ = paths(key)
+    items = fold(read_events(log))
+    item = resolve(items, args.id)
+    print(f"{item['id']}  {MARK[item['state']]} {item['state']}")
+    for line in wrap(item["ask"], 80, "  "):
+        print(line)
+    if item["evidence"]:
+        print("\n  evidence")
+        for k, v in item["evidence"].items():
+            for line in wrap(f"{k}: {v}", 76, "    "):
+                print(line)
+    prior = prior_generations(read_events(log), item["id"], item["history"])
+    if prior:
+        print("\n  earlier items that held this id")
+        for gen in prior:
+            when = gen["added"][:16].replace("T", " ")
+            end = f" → {gen['state']}" if gen["state"] else ""
+            print(f"    {when}{end}: {gen['ask'][:64]}")
+        print("    (full history in log.jsonl)")
+    print("\n  history")
+    for e in item["history"]:
+        when = e.get("at", "")[:16].replace("T", " ")
+        if e.get("kind") == "add":
+            print(f"    {when}  added")
+        elif e.get("kind") == "note":
+            print(f"    {when}  note: {e.get('text','')[:60]}")
+        else:
+            extra = e.get("proof") or e.get("commit") or e.get("why") or e.get("by") or ""
+            print(f"    {when}  → {e.get('state','')}  {extra[:56]}")
+
+
+def cmd_history(args) -> None:
+    args.id = args.id
+    cmd_show(args)
+
+
+def rebuild(key: str) -> None:
+    """QUEUE.md is derived. Never edited by hand, never the source of truth."""
+    log, md = paths(key)
+    items = fold(read_events(log))
+    order = {s: n for n, s in enumerate(STATES)}
+    lines = [
+        f"# Queue — {key}",
+        "",
+        "Derived from `log.jsonl`. Do not edit: run `queue` and this is rewritten.",
+        "",
+        f"_{datetime.now().strftime('%Y-%m-%d %H:%M')}_",
+        "",
+    ]
+    for state in STATES:
+        rows = [i for i in items.values() if i["state"] == state]
+        if not rows:
+            continue
+        lines.append(f"## {state} ({len(rows)})")
+        lines.append("")
+        for item in sorted(rows, key=lambda i: id_order(i["id"])):
+            lines.append(f"- **{item['id']}** — {item['ask']}")
+            for field in ("by", "commit", "proof", "why"):
+                if item["evidence"].get(field):
+                    lines.append(f"  - `{field}`: {item['evidence'][field]}")
+        lines.append("")
+    _ = order
+    md.write_text("\n".join(lines), encoding="utf8")
+
+
+def cmd_sync(args) -> None:
+    key = repo_key()
+    rebuild(key)
+    print(f"Rewrote {ROOT / key / 'QUEUE.md'}")
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="queue", description=__doc__)
+
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    a = sub.add_parser("add", help="capture an ask, verbatim")
+    a.add_argument("ask")
+    a.add_argument("--tag", action="append")
+    a.add_argument("--source")
+    a.set_defaults(fn=cmd_add)
+
+    for name, state, extra in (
+        ("start", "doing", ("by",)),
+        ("done", "done", ("commit", "proof")),
+        ("block", "blocked", ("why",)),
+        ("wontdo", "wontdo", ("why",)),
+        ("drop", "dropped", ("why",)),
+        ("requeue", "todo", ()),
+    ):
+        s = sub.add_parser(name, help=f"→ {state}")
+        s.add_argument("id")
+        for field in ("by", "commit", "proof", "why", "clauses"):
+            s.add_argument(f"--{field}")
+        s.set_defaults(fn=lambda args, _s=state: cmd_move(args, _s))
+        _ = extra
+
+    n = sub.add_parser("note", help="add a note without changing state")
+    n.add_argument("id")
+    n.add_argument("text")
+    n.set_defaults(fn=cmd_note)
+
+    l = sub.add_parser("ls", help="what is outstanding")
+    l.add_argument("--state", choices=STATES)
+    l.add_argument("--project", action="store_true", help="every worktree of this project")
+    l.add_argument("--mine", action="store_true", help="only this agent's items")
+    l.add_argument("--everything", action="store_true", help="include done and dropped")
+    l.set_defaults(fn=cmd_ls)
+
+    nx = sub.add_parser("next", help="start this agent's oldest todo item here")
+    nx.add_argument(
+        "--anyone",
+        action="store_true",
+        help="Sam asked for every agent's work in this worktree",
+    )
+    nx.set_defaults(fn=cmd_next)
+
+    hd = sub.add_parser("hand", help="SAM ONLY: give an item to another agent")
+    hd.add_argument("id")
+    hd.add_argument("--to", required=True, help="the session id taking it over")
+    hd.set_defaults(fn=cmd_hand)
+
+    sh = sub.add_parser("show", help="one item and its history")
+    sh.add_argument("id")
+    sh.set_defaults(fn=cmd_show)
+
+    h = sub.add_parser("history", help="alias of show")
+    h.add_argument("id")
+    h.set_defaults(fn=cmd_history)
+
+    sy = sub.add_parser("sync", help="rewrite QUEUE.md")
+    sy.set_defaults(fn=cmd_sync)
+
+    args = p.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BrokenPipeError:
+        os._exit(0)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    _ = time

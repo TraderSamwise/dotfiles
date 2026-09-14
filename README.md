@@ -34,6 +34,7 @@ restores VS Code (the `editor-tweaks` extension build needs `node`). With
 | `watchman/watchman-config.json` | `~/.watchman-config.json` (`WATCHMAN_CONFIG_FILE` in `zsh/zshrc`) |
 | `opencode/opencode.json` | `~/.config/opencode/opencode.json` |
 | `bin/git-merge`, `bin/cs` | `~/.local/bin/git-merge`, `~/.local/bin/cs` |
+| `bin/queue`, `claude/skills/queue/SKILL.md` | `~/.local/bin/queue`; the skill in `~/.claude/skills/queue/` and `~/.codex/skills/queue/` (store: `~/cs/docs/agent-queue/<repo>/`, created on first use) |
 | `hammerspoon/init.lua`, `omnibox_tab.lua`, `vscode_swipe_nav.lua` | `~/.hammerspoon/` |
 | `vscode/` | VS Code User dir — see [`vscode/README.md`](vscode/README.md) |
 | `Brewfile` | `brew bundle` |
