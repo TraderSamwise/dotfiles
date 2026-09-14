@@ -41,8 +41,14 @@ write com.apple.screencapture style -string window
 option_command_space='<key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1572864</integer></array></dict>'
 write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 "<dict><key>enabled</key><true/>$option_command_space</dict>"
 write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 65 "<dict><key>enabled</key><false/>$option_command_space</dict>"
+# Desktop 1-10 (ids 118-127) on hyper+N (⌘⌥⌃⇧): hammerspoon/init.lua owns ⌃N,
+# hides visor apps, then sends hyper+N. Parameters must be integers.
+desktop_keycodes=(18 19 20 21 23 22 26 28 25 29)
+for i in "${!desktop_keycodes[@]}"; do
+  write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add $((118 + i)) "<dict><key>enabled</key><true/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>65535</integer><integer>${desktop_keycodes[$i]}</integer><integer>1966080</integer></array></dict></dict>"
+done
 if ! /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u; then
-  echo "!! could not reload keyboard shortcuts; log out and back in to apply ⌘⌥Space" >&2
+  echo "!! could not reload keyboard shortcuts; log out and back in to apply the keyboard shortcuts" >&2
 fi
 
 # The universalaccess domain is protected: writing it needs Full Disk Access.

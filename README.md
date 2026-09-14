@@ -34,6 +34,7 @@ restores VS Code (the `editor-tweaks` extension build needs `node`). With
 | `watchman/watchman-config.json` | `~/.watchman-config.json` (`WATCHMAN_CONFIG_FILE` in `zsh/zshrc`) |
 | `opencode/opencode.json` | `~/.config/opencode/opencode.json` |
 | `bin/git-merge`, `bin/cs` | `~/.local/bin/git-merge`, `~/.local/bin/cs` |
+| `hammerspoon/init.lua`, `omnibox_tab.lua`, `vscode_swipe_nav.lua` | `~/.hammerspoon/` |
 | `vscode/` | VS Code User dir — see [`vscode/README.md`](vscode/README.md) |
 | `Brewfile` | `brew bundle` |
 | `macos/defaults.sh` | run by `bootstrap.sh --macos` |
@@ -51,6 +52,11 @@ Keys that differ from the defaults, and the file that sets each.
 | ⌘= / ⌘− | font size up / down | `ghostty/config` |
 | ⌘⌫ | delete to line start (Ghostty sends `^U`) | `zsh/zshrc` (`bindkey '^U' backward-kill-line`) |
 | ⌘⌥Space | Spotlight, leaving ⌘Space for Raycast | `macos/defaults.sh` |
+| ⌃1 … ⌃0 | switch to Desktop 1–10, hiding visor apps first | `hammerspoon/init.lua` (sends hyper+N; `macos/defaults.sh` puts Desktop N on hyper+N — without that step ⌃N switches nothing) |
+| ⌃⇧1 … ⌃⇧9 | move the focused app to Desktop N | `hammerspoon/init.lua` |
+| ⌃⇧A | assign the focused app to the current Desktop | `hammerspoon/init.lua` |
+| visor keys | show an app on the current Space, press again to hide it | `visors` in `~/.hammerspoon/init.local.lua` (default: ⌥` Finder) |
+| Tab / ⇧Tab in the Chrome address bar | move through suggestions | `hammerspoon/omnibox_tab.lua` |
 
 Image paste in Claude Code: ⌘V works in cmux, which saves the clipboard image to
 `$TMPDIR/clipboard-*.png` and pastes the path. In plain Ghostty, Terminal or
@@ -58,6 +64,27 @@ iTerm, use ⌃V inside Claude Code.
 
 The powerlevel9k prompt needs a Powerline font in terminals other than Ghostty,
 which bundles its own glyphs: `brew install --cask font-meslo-for-powerlevel10k`.
+
+## Prompt and terminal look
+
+A correct install looks like this; check each when a machine looks different.
+
+- `echo $ZSH_THEME` prints `powerlevel9k/powerlevel9k`, and
+  `git -C ~/.oh-my-zsh/custom/themes/powerlevel9k rev-parse --short HEAD` prints
+  `66d53c0` (the archived upstream head). The prompt is **one line**: user@host
+  (hidden when you are `$DEFAULT_USER` on a local shell), directory, git status,
+  and rbenv / conda env when active on the left;
+  exit status, background jobs, history number and time on the right.
+- A two-line prompt, or a prompt with a `╭─` / `╰─` frame, means something else
+  owns the prompt: a leftover powerlevel10k setup (`~/.p10k.zsh`, a
+  `source ~/powerlevel10k/...` line), a `~/.zshrc.local` that sets a theme, or a
+  `~/.zshrc` that is not the symlink into this repo (`ls -l ~/.zshrc`).
+- The terminal is Ghostty or cmux reading `ghostty/config` (theme `Kilobit`,
+  block cursor, `macos-option-as-alt`). Both bundle the Powerline glyphs; in
+  Terminal or iTerm install `font-meslo-for-powerlevel10k` and select it, or the
+  prompt shows boxes where the arrows should be.
+- `ls -l ~/.config/ghostty/config` points into this repo. A machine cloned before
+  the Ghostty config was added needs `git pull && ./bootstrap.sh`.
 
 ## macOS
 
@@ -103,6 +130,7 @@ gitignored):
 | `~/.zshrc.local` | interactive shells, last | aliases, conda, extra PATH, other tokens |
 | `~/.gitconfig` | git, after `~/.config/git/config` | `[user]`, credential helpers |
 | `~/.config/nvim/lua/plugins/private/init.lua` | lazy.nvim (gitignored) | plugin specs from private repos |
+| `~/.hammerspoon/init.local.lua` | `hammerspoon/init.lua` | `return { visors = { ... } }` plus any personal hotkeys or watchers |
 
 `~/.gitconfig` must exist: when it is absent, `git config --global` writes into
 the XDG file, which is this repo. `bootstrap.sh` creates it.
