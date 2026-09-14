@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Copilot"
+  short_description: "Review GitHub Copilot PR feedback and respond"
+  default_prompt: "Fetch Copilot PR review comments, categorize, reply or fix, and commit changes."

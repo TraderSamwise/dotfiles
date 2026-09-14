@@ -71,6 +71,23 @@ iTerm, use ⌃V inside Claude Code.
 The powerlevel9k prompt needs a Powerline font in terminals other than Ghostty,
 which bundles its own glyphs: `brew install --cask font-meslo-for-powerlevel10k`.
 
+## Claude Code and Codex
+
+| Repo path | Linked to | What it is |
+|-----------|-----------|------------|
+| `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Shared agent rules. Machine-private rules go in an untracked `~/CLAUDE.md`; Claude Code loads both |
+| `claude/commands/*.md` | `~/.claude/commands/` | `/plan-execute`, `/review-coderabbit`, `/review-copilot`, `/review-feedback`, `/check-ci` |
+| `claude/skills/*/SKILL.md` | `~/.claude/skills/` | `queue`, `oneshot-secret`, `setup-worktree`, `ralph` |
+| `claude/hooks/*.js` | `~/.claude/hooks/` | Bash safety gate, Cypress gate, auto-memory write block, per-repo memory index injection (no-op without `~/cs/docs/agent-memory`) |
+| `claude/statusline-command.sh` | `~/.claude/statusline-command.sh` | Footer: user@host, directory, git branch, context bar, model, session, vim mode |
+| `claude/settings.json` | copied once to `~/.claude/settings.json` if absent | Model, effort, auto mode, notifications, status line and hook wiring |
+| `codex/skills/**` | `~/.codex/skills/` | Codex versions of plan-execute, review-coderabbit, review-copilot, current-branch-pr, commit-review-flow, setup-worktree |
+| `bin/sync-codex-claude` | `~/.local/bin/sync-codex-claude` | Builds Codex `developer_instructions` from the `codex:sync` regions of `~/.claude/CLAUDE.md` then `~/CLAUDE.md` |
+
+After editing either `CLAUDE.md`, run `sync-codex-claude`. `settings.json` is not
+linked because Claude Code writes to it; copy changes into `claude/settings.json`
+by hand when they are worth sharing.
+
 ## Prompt and terminal look
 
 A correct install looks like this; check each when a machine looks different.

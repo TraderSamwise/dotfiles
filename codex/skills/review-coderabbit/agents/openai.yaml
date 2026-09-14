@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review CodeRabbit"
+  short_description: "Run the CodeRabbit PR review loop"
+  default_prompt: "Fetch CodeRabbit PR feedback, fix or respond to each thread, push changes, and repeat until clean."

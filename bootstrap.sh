@@ -97,10 +97,23 @@ link bin/cs "$HOME/.local/bin/cs"
 link bin/queue "$HOME/.local/bin/queue"
 link bin/sync-codex-claude "$HOME/.local/bin/sync-codex-claude"
 link claude/CLAUDE.md "$HOME/.claude/CLAUDE.md"
+link claude/statusline-command.sh "$HOME/.claude/statusline-command.sh"
+# Claude Code rewrites settings.json itself, so it is copied once rather than linked.
+if [ ! -e "$HOME/.claude/settings.json" ]; then
+  cp "$DOTFILES/claude/settings.json" "$HOME/.claude/settings.json"
+  echo "create $HOME/.claude/settings.json"
+fi
+for f in $(cd "$DOTFILES" && ls claude/commands/*.md claude/hooks/*.js); do
+  link "$f" "$HOME/.claude/${f#claude/}"
+done
+for f in $(cd "$DOTFILES" && ls claude/skills/*/SKILL.md); do
+  link "$f" "$HOME/.claude/${f#claude/}"
+done
+for f in $(cd "$DOTFILES" && find codex/skills -type f); do
+  link "$f" "$HOME/.codex/${f#codex/}"
+done
 link bin/oneshot-secret "$HOME/.local/bin/oneshot-secret"
-link claude/skills/oneshot-secret/SKILL.md "$HOME/.claude/skills/oneshot-secret/SKILL.md"
 link claude/skills/oneshot-secret/SKILL.md "$HOME/.codex/skills/oneshot-secret/SKILL.md"
-link claude/skills/queue/SKILL.md "$HOME/.claude/skills/queue/SKILL.md"
 link claude/skills/queue/SKILL.md "$HOME/.codex/skills/queue/SKILL.md"
 link hammerspoon/init.lua "$HOME/.hammerspoon/init.lua"
 link hammerspoon/omnibox_tab.lua "$HOME/.hammerspoon/omnibox_tab.lua"

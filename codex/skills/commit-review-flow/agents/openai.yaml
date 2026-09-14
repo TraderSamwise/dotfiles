@@ -1,0 +1,4 @@
+interface:
+  display_name: "Commit Review Flow"
+  short_description: "Review recent commits in a specified worktree"
+  default_prompt: "Review recent commits since the last checkpoint or a provided range, using git in the given worktree."

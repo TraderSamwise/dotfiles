@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Execute"
+  short_description: "Execute phased plans with audit gates"
+  default_prompt: "Use $plan-execute to break this goal into phases, audit each step, implement, verify, and commit as appropriate."
