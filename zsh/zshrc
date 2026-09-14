@@ -13,9 +13,6 @@ bindkey "^[[B" history-beginning-search-forward-end
 
 POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir rbenv vcs anaconda)
 
-# make jetbrains terminal alt key work
-bindkey "\e\eOD" backward-word
-bindkey "\e\eOC" forward-word
 
 # make cmd+backspace delete backward from cursor only (not whole line)
 bindkey '^U' backward-kill-line
