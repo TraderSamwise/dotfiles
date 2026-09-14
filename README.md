@@ -57,6 +57,10 @@ Keys that differ from the defaults, and the file that sets each.
 | ⌃1 … ⌃0 | switch to Desktop 1–10, hiding visor apps first | `hammerspoon/init.lua` (sends hyper+N; `macos/defaults.sh` puts Desktop N on hyper+N — without that step ⌃N switches nothing) |
 | ⌃⇧1 … ⌃⇧9 | move the focused app to Desktop N | `hammerspoon/init.lua` |
 | ⌃⇧A | assign the focused app to the current Desktop | `hammerspoon/init.lua` |
+| ⌃⇧← / ⌃⇧→ | window to the left two-thirds / right third | Rectangle (`rectangle/com.knollsoft.Rectangle.plist`) |
+| ⌃⇧↑ / ⌃⇧↓ | maximize / restore the window | Rectangle |
+| ⌃⌥⇧← / ⌃⌥⇧→ | move the window to the previous / next display | Rectangle |
+| ⌃⌥B / ⌃⌥N | toggle / reflow Rectangle's Todo mode | Rectangle |
 | visor keys | show an app on the current Space, press again to hide it | `visors` in `~/.hammerspoon/init.local.lua` (default: ⌥` Finder) |
 | Tab / ⇧Tab in the Chrome address bar | move through suggestions | `hammerspoon/omnibox_tab.lua` |
 
@@ -96,7 +100,9 @@ extensions shown, Dark mode, tap to click, three-finger horizontal swipe, an
 auto-hiding Dock without launch animation or Space reordering, Finder path bar
 and list view with search scoped to the current folder and external drives on
 the desktop, screenshots saved to `~/Desktop/screenshots` in window mode, reduced
-transparency, and Spotlight on ⌘⌥Space. Key repeat and trackpad settings apply
+transparency, and Spotlight on ⌘⌥Space. It also imports Rectangle's shortcuts
+(every other Rectangle default is cleared) and settings, quitting and reopening
+Rectangle around the import. Key repeat and trackpad settings apply
 after logging out; the script restarts Dock, Finder and SystemUIServer. Writing reduced transparency needs Full
 Disk Access for the terminal; the script prints a warning when it cannot.
 

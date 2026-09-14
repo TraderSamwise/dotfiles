@@ -59,6 +59,22 @@ else
   echo "!! reduceTransparency NOT set: give your terminal Full Disk Access (System Settings > Privacy & Security), then rerun" >&2
 fi
 
+# Rectangle loads its preferences at launch and saves them on quit, so it is
+# quit before the import and reopened after.
+rectangle_prefs="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/rectangle/com.knollsoft.Rectangle.plist"
+if [ -d /Applications/Rectangle.app ]; then
+  osascript -e 'quit app "Rectangle"' >/dev/null 2>&1 || true
+  for _ in $(seq 1 50); do pgrep -x Rectangle >/dev/null || break; sleep 0.2; done
+  if defaults import com.knollsoft.Rectangle "$rectangle_prefs"; then
+    echo "set    com.knollsoft.Rectangle (rectangle/com.knollsoft.Rectangle.plist)"
+  else
+    echo "!! Rectangle import failed; its previous settings are unchanged" >&2
+  fi
+  open -a Rectangle
+else
+  echo "!! Rectangle.app not installed; skipped its shortcuts (brew install --cask rectangle, then rerun)" >&2
+fi
+
 for app in Dock Finder SystemUIServer; do
   if killall "$app" 2>/dev/null; then
     echo "restart $app"
