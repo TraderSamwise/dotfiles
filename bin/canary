@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Launch Chrome Canary against the debug profile with CDP enabled on :9222.
+# This is the profile to live in — sync keeps it populated with bookmarks/history/extensions.
+set -euo pipefail
+
+PROFILE="$HOME/Library/Application Support/Google/Chrome Canary Debug"
+PORT=9222
+
+if pgrep -f "Chrome Canary.app/Contents/MacOS/Google Chrome Canary --remote-debugging-port=${PORT}" >/dev/null; then
+  echo "Canary already running on :${PORT}"
+  exit 0
+fi
+
+if pgrep -f "Chrome Canary.app/Contents/MacOS/Google Chrome Canary" >/dev/null; then
+  echo "A different Canary instance is running — quit it first (it will block CDP on the debug profile)." >&2
+  exit 1
+fi
+
+exec open -na "Google Chrome Canary" --args \
+  --remote-debugging-port="${PORT}" \
+  --user-data-dir="${PROFILE}" \
+  "$@"

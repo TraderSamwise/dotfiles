@@ -88,6 +88,27 @@ After editing either `CLAUDE.md`, run `sync-codex-claude`. `settings.json` is no
 linked because Claude Code writes to it; copy changes into `claude/settings.json`
 by hand when they are worth sharing.
 
+## Node: Volta and nvm
+
+`volta/tools.txt` lists the Volta runtimes, package managers and CLIs (Claude Code,
+Codex, pnpm, eas, wrangler, opencode, firebase, chrome-devtools-mcp); the last `node@`
+and `yarn@` lines are the defaults. `bootstrap.sh` runs `volta/install.sh`, which
+installs what is missing and writes `~/.local/volta-shims`: `zsh/zshenv` removes
+Volta's own `bin` from PATH, so a Volta binary is only reachable when tools.txt names
+a shim for it. nvm owns plain `node`; bootstrap installs the latest LTS as its default
+when none is set.
+
+## Chrome DevTools MCP
+
+`bootstrap.sh --chrome-mcp` runs `chrome-mcp/install.sh`: it renders the three
+LaunchAgents in `chrome-mcp/launchd/` for this machine (`local.chrome-devtools-mcp`
+keeps an `mcp-proxy` on `127.0.0.1:9223/mcp` around `bin/chrome-devtools-mcp-wrapper.sh`;
+`local.chrome-mcp-healthcheck` restarts it when a real MCP call fails, every 60s;
+`local.chrome-mcp-logtrim` caps its logs hourly), loads them, and registers
+`chrome-devtools` with Claude Code and Codex. It needs Chrome Canary (Brewfile) and
+Volta node 22. `canary` launches Canary on the empty debug profile with port 9222;
+`chrome-mcp-restart` is the manual kick when `/mcp` shows "Not connected".
+
 ## Prompt and terminal look
 
 A correct install looks like this; check each when a machine looks different.

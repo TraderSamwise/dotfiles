@@ -8,13 +8,15 @@ BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 WITH_BREW=1
 WITH_VSCODE=1
 WITH_MACOS=0
+WITH_CHROME_MCP=0
 
 for arg in "$@"; do
   case "$arg" in
     --no-brew) WITH_BREW=0 ;;
     --no-vscode) WITH_VSCODE=0 ;;
     --macos) WITH_MACOS=1 ;;
-    -h|--help) echo "usage: $0 [--no-brew] [--no-vscode] [--macos]"; exit 0 ;;
+    --chrome-mcp) WITH_CHROME_MCP=1 ;;
+    -h|--help) echo "usage: $0 [--no-brew] [--no-vscode] [--macos] [--chrome-mcp]"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -95,6 +97,9 @@ link opencode/opencode.json "$HOME/.config/opencode/opencode.json"
 link bin/git-merge "$HOME/.local/bin/git-merge"
 link bin/cs "$HOME/.local/bin/cs"
 link bin/queue "$HOME/.local/bin/queue"
+for script in canary chrome-devtools-mcp-wrapper.sh chrome-mcp-healthcheck.sh chrome-mcp-log-trim.sh chrome-mcp-restart; do
+  link "bin/$script" "$HOME/.local/bin/$script"
+done
 link bin/sync-codex-claude "$HOME/.local/bin/sync-codex-claude"
 link claude/CLAUDE.md "$HOME/.claude/CLAUDE.md"
 link claude/statusline-command.sh "$HOME/.claude/statusline-command.sh"
@@ -137,6 +142,27 @@ if [ "$WITH_BREW" = 1 ]; then
   brew bundle --file "$DOTFILES/Brewfile" || echo "!! brew bundle failed; rerun: brew bundle --file $DOTFILES/Brewfile" >&2
 fi
 
+"$DOTFILES/volta/install.sh" || echo "!! Volta tools step failed" >&2
+
+# nvm owns `node` outside Volta-pinned projects; give a fresh machine an LTS default.
+export NVM_DIR="$HOME/.nvm"
+mkdir -p "$NVM_DIR"
+nvm_sh="$NVM_DIR/nvm.sh"
+[ -s "$nvm_sh" ] || nvm_sh="$(brew --prefix nvm 2>/dev/null || true)/nvm.sh"
+if [ -s "$nvm_sh" ]; then
+  (
+    set +eu
+    . "$nvm_sh"
+    if [ "$(nvm version default)" = "N/A" ]; then
+      nvm install --lts && nvm alias default 'lts/*'
+    else
+      echo "ok     nvm default $(nvm version default)"
+    fi
+  ) || echo "!! nvm LTS install failed" >&2
+else
+  echo "!! nvm not installed (brew install nvm); skipped node default" >&2
+fi
+
 if ! command -v xkcdpass >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/xkcdpass" ]; then
   if command -v uv >/dev/null 2>&1; then
     uv tool install xkcdpass || echo "!! uv tool install xkcdpass failed" >&2
@@ -147,6 +173,10 @@ fi
 
 if [ "$WITH_VSCODE" = 1 ]; then
   "$DOTFILES/vscode/bootstrap.sh"
+fi
+
+if [ "$WITH_CHROME_MCP" = 1 ]; then
+  "$DOTFILES/chrome-mcp/install.sh" || echo "!! Chrome MCP step failed" >&2
 fi
 
 if [ "$WITH_MACOS" = 1 ]; then

@@ -1,0 +1,15 @@
+# Volta tools, installed in this order: the last node@ and yarn@ lines are the defaults.
+# Format: <volta install target> [binaries to put on PATH via ~/.local/volta-shims]
+# node itself gets no shim: nvm owns `node` outside Volta-pinned projects.
+node@22
+node@24
+yarn@4
+yarn@1.22                   yarn yarnpkg
+@anthropic-ai/claude-code   claude
+@openai/codex               codex
+chrome-devtools-mcp
+eas-cli                     eas
+firebase-tools
+opencode-ai                 opencode
+pnpm                        pn pnpm pnpx pnx
+wrangler                    wrangler wrangler2

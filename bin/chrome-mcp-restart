@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Restart the chrome-devtools mcp-proxy that Claude Code talks to on
+# 127.0.0.1:9223. Use this when the /mcp dialog shows "tools fetch failed"
+# / "Not connected" — usually because the Streamable-HTTP session got out of
+# sync after Claude Code reloaded.
+#
+# The proxy is launchd-managed (KeepAlive=true), so `kickstart -k` kills the
+# current process and lets launchd respawn it cleanly. Falls back to pkill
+# if launchctl isn't happy.
+
+set -euo pipefail
+
+LABEL="local.chrome-devtools-mcp"
+PORT=9223
+TARGET="gui/$(id -u)/${LABEL}"
+
+echo "[chrome-mcp-restart] kickstarting ${LABEL}"
+if ! launchctl kickstart -k "${TARGET}" 2>/dev/null; then
+  echo "[chrome-mcp-restart] launchctl kickstart failed; falling back to pkill"
+  pkill -f "mcp-proxy .*--port ${PORT}" || true
+fi
+
+# Wait for the proxy to listen again. launchd's ThrottleInterval is 10s, plus
+# the wrapper polls Chrome's :9222 for up to 60s — so 30s is a comfortable
+# upper bound on the common case.
+for _ in $(seq 1 30); do
+  if lsof -nP -iTCP:${PORT} -sTCP:LISTEN >/dev/null 2>&1; then
+    pid=$(lsof -nP -iTCP:${PORT} -sTCP:LISTEN -t | head -1)
+    echo "[chrome-mcp-restart] proxy listening on :${PORT} (pid ${pid})"
+    echo "[chrome-mcp-restart] now hit /mcp → Reconnect inside Claude Code"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "[chrome-mcp-restart] proxy did not come back up on :${PORT} within 30s" >&2
+echo "[chrome-mcp-restart] check /tmp/chrome-mcp-supergateway.err and /tmp/chrome-mcp.log" >&2
+exit 1
