@@ -1,10 +1,4 @@
 cursor-style = block
-# In-app visor disabled — ctrl+` is now a Hammerspoon whole-app toggle, which
-# survives cmux's main thread being saturated by many live surfaces.
-# keybind = global:ctrl+grave_accent=toggle_quick_terminal
-# quick-terminal-position = top
-# quick-terminal-animation-duration = 0
-theme = Kilobit
 unfocused-split-opacity = 0.6
 keybind = super+equal=increase_font_size:0.2
 keybind = super+minus=decrease_font_size:0.2

@@ -24,7 +24,6 @@ restores VS Code (the `editor-tweaks` extension build needs `node`). With
 | `bash/bashrc`, `bash/bash_profile`, `bash/profile` | `~/.bashrc`, `~/.bash_profile`, `~/.profile` |
 | `git/config`, `git/ignore` | `~/.config/git/config`, `~/.config/git/ignore` |
 | `ghostty/config` | `~/.config/ghostty/config` and `~/Library/Application Support/com.cmuxterm.app/config.ghostty` (cmux reads the Ghostty config) |
-| `cmux/cmux.json` | `~/.config/cmux/cmux.json` |
 | `nvim/` (LazyVim) | `~/.config/nvim` |
 | `vim/vimrc` | `~/.vimrc` |
 | `tmux/tmux.conf` | `~/.tmux.conf` |
@@ -123,8 +122,8 @@ A correct install looks like this; check each when a machine looks different.
   owns the prompt: a leftover powerlevel10k setup (`~/.p10k.zsh`, a
   `source ~/powerlevel10k/...` line), a `~/.zshrc.local` that sets a theme, or a
   `~/.zshrc` that is not the symlink into this repo (`ls -l ~/.zshrc`).
-- The terminal is Ghostty or cmux reading `ghostty/config` (theme `Kilobit`,
-  block cursor, `macos-option-as-alt`). Both bundle the Powerline glyphs; in
+- The terminal is Ghostty or cmux reading `ghostty/config` (block cursor,
+  `macos-option-as-alt`). Both bundle the Powerline glyphs; in
   Terminal or iTerm install `font-meslo-for-powerlevel10k` and select it, or the
   prompt shows boxes where the arrows should be.
 - `ls -l ~/.config/ghostty/config` points into this repo. A machine cloned before
