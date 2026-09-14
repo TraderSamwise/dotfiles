@@ -77,7 +77,7 @@ which bundles its own glyphs: `brew install --cask font-meslo-for-powerlevel10k`
 |-----------|-----------|------------|
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Shared agent rules. Machine-private rules go in an untracked `~/CLAUDE.md`; Claude Code loads both |
 | `claude/commands/*.md` | `~/.claude/commands/` | `/plan-execute`, `/review-coderabbit`, `/review-copilot`, `/review-feedback`, `/check-ci` |
-| `claude/skills/*/SKILL.md` | `~/.claude/skills/` | `queue`, `oneshot-secret`, `setup-worktree`, `ralph` |
+| `claude/skills/*/SKILL.md` | `~/.claude/skills/` | `queue`, `oneshot-secret`, `setup-worktree` |
 | `claude/hooks/*.js` | `~/.claude/hooks/` | Bash safety gate, Cypress gate, auto-memory write block, per-repo memory index injection (no-op without `~/cs/docs/agent-memory`) |
 | `claude/statusline-command.sh` | `~/.claude/statusline-command.sh` | Footer: user@host, directory, git branch, context bar, model, session, vim mode |
 | `claude/settings.json` | copied once to `~/.claude/settings.json` if absent | Model, effort, auto mode, notifications, status line and hook wiring |
