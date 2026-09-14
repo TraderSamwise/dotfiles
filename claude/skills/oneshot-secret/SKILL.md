@@ -14,7 +14,9 @@ secret value, and never paste one into the conversation.**
 
 ## Handoff slot — one value, transient
 
-- The user stores: `oneshot-secret put` (reads the clipboard).
+- The user stores: `oneshot-secret put` (reads the clipboard), or
+  `oneshot-secret put --prompt` (types it hidden, twice, in their own terminal —
+  never via `!`, which has no tty).
 - You consume and delete: `oneshot-secret get` — this **destroys** the value.
 - You read without deleting: `oneshot-secret peek`.
 - State: `oneshot-secret status`; cleanup: `oneshot-secret clear`.
