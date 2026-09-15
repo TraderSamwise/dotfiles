@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 import tempfile
 import unittest
@@ -34,6 +35,17 @@ class QueueCase(unittest.TestCase):
             text=True,
             capture_output=True,
         )
+
+    def queue_log(self):
+        return self.home / "cs" / "docs" / "agent-queue" / self.repo.name / "log.jsonl"
+
+    def queue_md(self):
+        return self.home / "cs" / "docs" / "agent-queue" / self.repo.name / "QUEUE.md"
+
+    def write_events(self, events):
+        log = self.queue_log()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf8")
 
     def add_item(self, creator="claude-overseer", ask="do the thing"):
         result = self.run_queue(creator, "add", ask)
@@ -114,6 +126,195 @@ class QueueCase(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--clauses says a requirement is not met", result.stderr)
+
+    def test_closed_slot_is_not_reused_and_bare_number_stays_ergonomic(self):
+        first_id = self.add_item(creator="sam", ask="first ask")
+        other_id = self.add_item(creator="codex-other", ask="other agent ask")
+        self.assertEqual(other_id, "other-1")
+        self.start_item(first_id, creator="sam", assignee="sam")
+        done = self.done_item("sam", "1")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+        second = self.run_queue("sam", "add", "second ask")
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("sam-2  todo", second.stdout)
+        start = self.run_queue("sam", "start", "2", "--by", "sam")
+        self.assertEqual(start.returncode, 0, start.stderr)
+        self.assertIn("sam-2  todo", start.stdout)
+        done_second = self.done_item("sam", "2")
+        self.assertEqual(done_second.returncode, 0, done_second.stderr)
+        self.assertIn("sam-2  doing", done_second.stdout)
+
+        events = [
+            json.loads(line)
+            for line in self.queue_log().read_text(encoding="utf8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(
+            [e["id"] for e in events if e["kind"] == "add"],
+            ["sam-1", "other-1", "sam-2"],
+        )
+        self.assertTrue(all(e.get("workId") == e["id"] for e in events))
+
+    def test_allocator_spends_past_old_ceiling_instead_of_recycling(self):
+        events = []
+        for n in range(1, 100):
+            eid = f"sam-{n}"
+            events.extend(
+                [
+                    {
+                        "id": eid,
+                        "workId": eid,
+                        "kind": "add",
+                        "at": f"2026-09-15T01:{n % 60:02d}:00+00:00",
+                        "ask": f"closed ask {n}",
+                        "by": "sam",
+                        "tree": self.repo.name,
+                    },
+                    {
+                        "id": eid,
+                        "workId": eid,
+                        "kind": "move",
+                        "at": f"2026-09-15T01:{n % 60:02d}:10+00:00",
+                        "state": "done",
+                        "by": "sam",
+                        "commit": f"sha{n}",
+                        "proof": f"proof {n}",
+                        "clauses": f"1 ask {n}: DONE",
+                    },
+                ]
+            )
+        self.write_events(events)
+
+        result = self.run_queue("sam", "add", "one hundredth ask")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("sam-100  todo", result.stdout)
+
+    def test_closure_event_work_id_identifies_ask_in_recycled_looking_log(self):
+        self.write_events(
+            [
+                {
+                    "id": "sam-1",
+                    "workId": "sam-1",
+                    "kind": "add",
+                    "at": "2026-09-15T01:00:00+00:00",
+                    "ask": "first ask that once held the alias",
+                    "by": "sam",
+                    "tree": self.repo.name,
+                },
+                {
+                    "id": "sam-1",
+                    "workId": "sam-1",
+                    "kind": "move",
+                    "at": "2026-09-15T01:01:00+00:00",
+                    "state": "doing",
+                    "by": "sam",
+                },
+                {
+                    "id": "sam-1",
+                    "workId": "sam-1",
+                    "kind": "move",
+                    "at": "2026-09-15T01:02:00+00:00",
+                    "state": "done",
+                    "by": "sam",
+                    "commit": "aaa111",
+                    "proof": "first proof",
+                    "clauses": "1 first: DONE",
+                },
+                {
+                    "id": "sam-1",
+                    "workId": "sam-2",
+                    "kind": "add",
+                    "at": "2026-09-15T02:00:00+00:00",
+                    "ask": "second ask using a recycled-looking alias",
+                    "by": "sam",
+                    "tree": self.repo.name,
+                },
+                {
+                    "id": "sam-1",
+                    "workId": "sam-2",
+                    "kind": "move",
+                    "at": "2026-09-15T02:01:00+00:00",
+                    "state": "doing",
+                    "by": "sam",
+                },
+                {
+                    "id": "sam-1",
+                    "workId": "sam-2",
+                    "kind": "move",
+                    "at": "2026-09-15T02:02:00+00:00",
+                    "state": "done",
+                    "by": "sam",
+                    "commit": "bbb222",
+                    "proof": "second proof",
+                    "clauses": "1 second: DONE",
+                },
+            ]
+        )
+
+        sync = self.run_queue("sam", "sync")
+        self.assertEqual(sync.returncode, 0, sync.stderr)
+        ambiguous = self.run_queue("sam", "show", "sam-1")
+        self.assertNotEqual(ambiguous.returncode, 0)
+        self.assertIn("multiple work ids: sam-1, sam-2", ambiguous.stderr)
+
+        result = self.run_queue("sam", "show", "sam-2")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("workId=sam-2", result.stdout)
+        self.assertIn("second ask using a recycled-looking alias", result.stdout)
+        self.assertIn("second proof", result.stdout)
+        self.assertLess(
+            result.stdout.find("second ask using a recycled-looking alias"),
+            result.stdout.find("earlier items that held this id"),
+        )
+        self.assertIn("first ask that once held the alias", result.stdout)
+        self.assertIn("`workId`: sam-2", self.queue_md().read_text(encoding="utf8"))
+
+    def test_existing_historical_recycled_entries_still_parse_and_render(self):
+        self.write_events(
+            [
+                {
+                    "id": "sam-1",
+                    "kind": "add",
+                    "at": "2026-09-15T01:00:00+00:00",
+                    "ask": "old first ask",
+                    "by": "sam",
+                    "tree": self.repo.name,
+                },
+                {
+                    "id": "sam-1",
+                    "kind": "move",
+                    "at": "2026-09-15T01:01:00+00:00",
+                    "state": "landed",
+                    "by": "sam",
+                    "commit": "old111",
+                    "proof": "old proof",
+                },
+                {
+                    "id": "sam-1",
+                    "kind": "add",
+                    "at": "2026-09-15T02:00:00+00:00",
+                    "ask": "old second ask",
+                    "by": "sam",
+                    "tree": self.repo.name,
+                },
+            ]
+        )
+
+        sync = self.run_queue("sam", "sync")
+        show = self.run_queue("sam", "show", "sam-1")
+
+        self.assertEqual(sync.returncode, 0, sync.stderr)
+        self.assertEqual(show.returncode, 0, show.stderr)
+        self.assertIn("old second ask", show.stdout)
+        self.assertIn("earlier items that held this id", show.stdout)
+        self.assertIn("old first ask", show.stdout)
+        rendered = self.queue_md().read_text(encoding="utf8")
+        self.assertIn("old second ask", rendered)
+        self.assertNotIn("old first ask", rendered)
 
 
 if __name__ == "__main__":

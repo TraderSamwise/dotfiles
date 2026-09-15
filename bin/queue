@@ -41,8 +41,10 @@ a repo shares one queue rather than each getting its own silo.
 An item belongs to the agent that queued it and to the worktree it was queued
 in. Both come from the environment — the runtime's own session id and git —
 rather than from a flag, so an agent cannot forget to say who it is or work
-another branch's list by accident. Ids are numbered per agent (`pzjidx-3`) and wrap at
-99. Another agent's item is refused unless the log shows they were assigned
+another branch's list by accident. Ids are numbered per agent (`pzjidx-3`) and
+never reused; Sam can still type the bare number for his own item
+(`queue done 37 ...`), but a closure in log.jsonl names one ask for the rest of
+time. Another agent's item is refused unless the log shows they were assigned
 with `start --by` or `next`; `queue hand` is how current ownership changes, and
 that is Sam's call.
 
@@ -315,16 +317,26 @@ def read_events(log: Path) -> list[dict]:
     return out
 
 
+def event_work_id(e: dict) -> str | None:
+    return e.get("workId") or e.get("id")
+
+
+def item_matches_token(item: dict, token: str) -> bool:
+    return token in (item.get("id"), item.get("workId"))
+
+
 def fold(events: list[dict]) -> dict[str, dict]:
     """The current state of every item, replayed from the log."""
     items: dict[str, dict] = {}
     for e in events:
         eid = e.get("id")
-        if not eid:
+        work_id = event_work_id(e)
+        if not eid or not work_id:
             continue
         if e.get("kind") == "add":
-            items[eid] = {
+            items[work_id] = {
                 "id": eid,
+                "workId": work_id,
                 "ask": e.get("ask", ""),
                 "state": "todo",
                 "added": e.get("at", ""),
@@ -337,7 +349,7 @@ def fold(events: list[dict]) -> dict[str, dict]:
                 "evidence": {},
             }
             continue
-        item = items.get(eid)
+        item = items.get(work_id)
         if not item:
             continue
         item["history"].append(e)
@@ -359,64 +371,27 @@ def fold(events: list[dict]) -> dict[str, dict]:
     return items
 
 
-# Ids stay short enough to type and to say out loud, so they wrap rather than
-# climb. A number comes back round only once its item is finished with.
-ID_CEILING = 99
+# Ids stay short enough to type and to say out loud, but they never recycle.
 CLOSED = ("done", "dropped")
 
 
 def next_id(events: list[dict], who: str) -> str:
     """
-    The agent's next number: one past its last, wrapping at 99.
+    The agent's next number: one past the largest number ever added.
 
-    Monotonic while it can be, because reading a log is easier when the numbers
-    climb, and short forever, because `q147` is a number nobody says out loud.
-    A number is only reused once its item reached a state Sam closed —
-    `done` or `dropped`. Anything still in flight keeps its number.
+    Sam can still type the bare number for his own item, but closed numbers stay
+    spent. Reuse made a slot id name different asks at different times, which
+    means the append-only log could not prove what a closure actually closed.
     """
     stem = short(who)
-    items = fold(events)
-    mine = [
+    mine = sorted(
         int(eid.rpartition("-")[2])
-        for eid in items
+        for e in events
+        if e.get("kind") == "add"
+        for eid in [e.get("id", "")]
         if eid.startswith(f"{stem}-") and eid.rpartition("-")[2].isdigit()
-    ]
-    busy = {
-        int(eid.rpartition("-")[2])
-        for eid, item in items.items()
-        if eid.startswith(f"{stem}-")
-        and eid.rpartition("-")[2].isdigit()
-        and item["state"] not in CLOSED
-    }
-    # A number that has never been used is always safer than one that has.
-    # Reuse is what lets a stale id in an agent's context mutate a different
-    # item, so spend every fresh number first and only then come back round.
-    used = set(mine)
-    for n in range(1, ID_CEILING + 1):
-        if n not in used:
-            return f"{stem}-{n}"
-    start = (max(mine) % ID_CEILING) + 1 if mine else 1
-    for step in range(ID_CEILING):
-        n = ((start - 1 + step) % ID_CEILING) + 1
-        if n not in busy:
-            prior = items.get(f"{stem}-{n}")
-            if prior:
-                closed_at = ""
-                for e in reversed(prior["history"]):
-                    if e.get("state") in CLOSED:
-                        closed_at = e.get("at", "")[:16].replace("T", " ")
-                        break
-                print(
-                    f"queue: reusing {stem}-{n}. It last held "
-                    f"\"{prior['ask'][:56]}\"" + (f", closed {closed_at}." if closed_at else ".")
-                    + "\n       That item stays in log.jsonl but leaves this view.",
-                    file=sys.stderr,
-                )
-            return f"{stem}-{n}"
-    sys.exit(
-        f"queue: {stem} has {ID_CEILING} items still open. Finish or drop some\n"
-        f"       before adding another — a queue this long is not a queue."
     )
+    return f"{stem}-{(mine[-1] + 1) if mine else 1}"
 
 
 def id_order(eid: str) -> tuple[int, str]:
@@ -429,20 +404,60 @@ def id_order(eid: str) -> tuple[int, str]:
 
 
 def resolve(items: dict[str, dict], token: str) -> dict:
+    def matching_items(candidate: str) -> list[dict]:
+        hits = [item for item in items.values() if item_matches_token(item, candidate)]
+        deduped: dict[str, dict] = {}
+        for item in hits:
+            deduped[item.get("workId") or item["id"]] = item
+        return list(deduped.values())
+
     if token in items:
-        return items[token]
+        display_collisions = [
+            item
+            for item in items.values()
+            if item.get("id") == token and item.get("workId") != token
+        ]
+        if not display_collisions:
+            return items[token]
+        hits = [items[token], *display_collisions]
+        sys.exit(
+            f"queue: {token!r} has multiple work ids: "
+            + ", ".join(sorted(item["workId"] for item in hits))
+            + ". Use the work id."
+        )
+
     # A bare number means MINE — `queue done 7` is what somebody types, and the
     # one queue it can safely mean is the caller's own.
     if token.isdigit():
         for candidate in (f"{short(handle())}-{token}", f"q{token}"):
-            if candidate in items:
-                return items[candidate]
+            hits = matching_items(candidate)
+            if len(hits) == 1:
+                return hits[0]
+            if len(hits) > 1:
+                sys.exit(
+                    f"queue: {candidate!r} has multiple work ids: "
+                    + ", ".join(sorted(item["workId"] for item in hits))
+                    + ". Use the work id."
+                )
     # A number and somebody else's stem, spelled either way round.
-    hits = [k for k in items if k.endswith(f"-{token}") or k == f"q{token}"]
+    hits = [
+        item
+        for item in items.values()
+        if item_matches_token(item, token)
+        or item.get("id", "").endswith(f"-{token}")
+        or item.get("workId", "").endswith(f"-{token}")
+        or item.get("id") == f"q{token}"
+        or item.get("workId") == f"q{token}"
+    ]
+    deduped: dict[str, dict] = {}
+    for item in hits:
+        deduped[item.get("workId") or item["id"]] = item
+    hits = list(deduped.values())
     if len(hits) == 1:
-        return items[hits[0]]
+        return hits[0]
     if len(hits) > 1:
-        sys.exit(f"queue: {token!r} could be {', '.join(sorted(hits))}.")
+        labels = [item.get("workId") or item["id"] for item in hits]
+        sys.exit(f"queue: {token!r} could be {', '.join(sorted(labels))}.")
     sys.exit(f"queue: no item {token!r}. Try `queue ls`.")
 
 
@@ -471,10 +486,12 @@ def cmd_add(args) -> None:
     if not ask:
         sys.exit("queue: an empty ask is not an ask.")
     eid = next_id(events, handle())
+    work_id = eid
     append(
         log,
         {
             "id": eid,
+            "workId": work_id,
             "kind": "add",
             "at": now(),
             "ask": ask,
@@ -585,7 +602,13 @@ def cmd_move(args, state: str) -> None:
                 "       tell Sam what you split off. Do not close over his own words.\n"
             )
 
-    event = {"id": item["id"], "kind": "move", "at": now(), "state": state}
+    event = {
+        "id": item["id"],
+        "workId": item.get("workId", item["id"]),
+        "kind": "move",
+        "at": now(),
+        "state": state,
+    }
     for field in ("by", "commit", "proof", "why", "clauses"):
         value = getattr(args, field, None)
         if value:
@@ -608,7 +631,16 @@ def cmd_note(args) -> None:
     log, _ = paths(key)
     items = fold(read_events(log))
     item = resolve(items, args.id)
-    append(log, {"id": item["id"], "kind": "note", "at": now(), "text": args.text})
+    append(
+        log,
+        {
+            "id": item["id"],
+            "workId": item.get("workId", item["id"]),
+            "kind": "note",
+            "at": now(),
+            "text": args.text,
+        },
+    )
     rebuild(key)
     print(f"{item['id']}  noted")
 
@@ -669,7 +701,17 @@ def cmd_hand(args) -> None:
     items = fold(read_events(log))
     item = resolve(items, args.id)
     was = owner_of(item) or "nobody"
-    append(log, {"id": item["id"], "kind": "hand", "at": now(), "to": args.to, "from": was})
+    append(
+        log,
+        {
+            "id": item["id"],
+            "workId": item.get("workId", item["id"]),
+            "kind": "hand",
+            "at": now(),
+            "to": args.to,
+            "from": was,
+        },
+    )
     rebuild(key)
     print(f"{item['id']}  {was} → {args.to}")
 
@@ -707,7 +749,14 @@ def cmd_next(args) -> None:
     item = sorted(free, key=lambda i: id_order(i["id"]))[0]
     append(
         log,
-        {"id": item["id"], "kind": "move", "at": now(), "state": "doing", "by": me},
+        {
+            "id": item["id"],
+            "workId": item.get("workId", item["id"]),
+            "kind": "move",
+            "at": now(),
+            "state": "doing",
+            "by": me,
+        },
     )
     rebuild(key)
     print(f"{item['id']}  todo → doing   {me}")
@@ -719,11 +768,9 @@ def prior_generations(events: list[dict], eid: str, current: list[dict]) -> list
     """
     Earlier items that held this id before it was reused.
 
-    Ids wrap at 99 and come back round once an item is closed, so a number can
-    have carried more than one ask. fold() keeps only the newest, which is right
-    for "what is this now" and wrong for "what did I close yesterday". This
-    reads the raw log so a closure never becomes unreachable just because its
-    number was handed on.
+    Older logs may have reused an id after close. New logs do not, and events
+    with `workId` are replayed by that stable key, but this still keeps old
+    recycled-slot history readable instead of pretending it never happened.
     """
     first_current = current[0].get("at") if current else None
     gens: list[dict] = []
@@ -750,7 +797,10 @@ def cmd_show(args) -> None:
     log, _ = paths(key)
     items = fold(read_events(log))
     item = resolve(items, args.id)
-    print(f"{item['id']}  {MARK[item['state']]} {item['state']}")
+    label = item["id"]
+    if item.get("workId") and item["workId"] != item["id"]:
+        label = f"{label}  workId={item['workId']}"
+    print(f"{label}  {MARK[item['state']]} {item['state']}")
     for line in wrap(item["ask"], 80, "  "):
         print(line)
     if item["evidence"]:
@@ -804,6 +854,8 @@ def rebuild(key: str) -> None:
         lines.append("")
         for item in sorted(rows, key=lambda i: id_order(i["id"])):
             lines.append(f"- **{item['id']}** — {item['ask']}")
+            if item.get("workId") and item["workId"] != item["id"]:
+                lines.append(f"  - `workId`: {item['workId']}")
             for field in ("by", "commit", "proof", "why"):
                 if item["evidence"].get(field):
                     lines.append(f"  - `{field}`: {item['evidence'][field]}")
