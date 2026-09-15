@@ -42,8 +42,9 @@ An item belongs to the agent that queued it and to the worktree it was queued
 in. Both come from the environment — the runtime's own session id and git —
 rather than from a flag, so an agent cannot forget to say who it is or work
 another branch's list by accident. Ids are numbered per agent (`pzjidx-3`) and wrap at
-99. Another agent's item is refused; `queue hand` is the only way work changes
-hands, and that is Sam's call.
+99. Another agent's item is refused unless the log shows they were assigned
+with `start --by` or `next`; `queue hand` is how current ownership changes, and
+that is Sam's call.
 
 There are three questions and no fourth: what is mine here (`next`), what is
 queued here (`ls`), and what is queued anywhere in this project (`--project`).
@@ -255,17 +256,33 @@ def repo_key() -> str:
 
 def owner_of(item: dict) -> str | None:
     """
-    Whose item this is, from the moment it was queued.
+    Whose item this is now.
 
     An agent owns what it captures. `None` is only ever an item from before
     ownership existed, and those are free for anyone — rewriting history to
-    give them an owner would be inventing one.
+    give them an owner would be inventing one. `queue hand` moves current
+    ownership, but does not erase the creator or the current assignee.
     """
     if item.get("owner"):
         return item["owner"]
     # Items from before ownership existed: whoever last moved one is holding
     # it. That is read from the log, not invented.
     return item["evidence"].get("by")
+
+
+def creator_of(item: dict) -> str | None:
+    """Who filed the current generation of this item."""
+    return item.get("creator") or item.get("history", [{}])[0].get("by")
+
+
+def assignee_of(item: dict) -> str | None:
+    """Who is currently assigned by a doing transition."""
+    return item.get("assignee")
+
+
+def transition_authorities(item: dict) -> set[str]:
+    """The agents allowed to move this item without a hand round-trip."""
+    return {who for who in (owner_of(item), creator_of(item), assignee_of(item)) if who}
 
 
 def paths(key: str) -> tuple[Path, Path]:
@@ -312,7 +329,9 @@ def fold(events: list[dict]) -> dict[str, dict]:
                 "state": "todo",
                 "added": e.get("at", ""),
                 "tags": e.get("tags", []),
+                "creator": e.get("by"),
                 "owner": e.get("by"),
+                "assignee": None,
                 "tree": e.get("tree"),
                 "history": [e],
                 "evidence": {},
@@ -330,6 +349,10 @@ def fold(events: list[dict]) -> dict[str, dict]:
         state = RETIRED.get(e.get("state"), e.get("state"))
         if state in STATES:
             item["state"] = state
+            if state == "doing" and e.get("by"):
+                item["assignee"] = e["by"]
+            elif state != "doing":
+                item["assignee"] = None
             for field in ("by", "commit", "proof", "why"):
                 if e.get(field):
                     item["evidence"][field] = e[field]
@@ -483,16 +506,21 @@ def cmd_move(args, state: str) -> None:
         )
 
     """
-    An agent owns what it queued, and only Sam moves work between agents.
+    An agent may move work they own, created, or are currently assigned.
 
     Two agents on one item is two half-finished jobs and a commit each. The
     usual reason another agent's item looks abandoned is that the other one is
-    still typing, so taking it is a decision rather than an inference.
+    still typing, so taking it is a decision rather than an inference. A start
+    event is that decision already; do not make the assigned agent hand it to
+    themself just to finish the work.
     """
-    held = owner_of(item)
-    if held and held != handle():
+    authorities = transition_authorities(item)
+    if authorities and handle() not in authorities:
+        held = owner_of(item)
+        assigned = assignee_of(item)
+        assigned_note = f", assigned to {assigned}" if assigned else ""
         sys.exit(
-            f"queue: {item['id']} belongs to {held}, and you are {handle()}.\n"
+            f"queue: {item['id']} belongs to {held}{assigned_note}, and you are {handle()}.\n"
             f"       If Sam wants you on it: queue hand {item['id']} --to {handle()}"
         )
 
