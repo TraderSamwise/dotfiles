@@ -79,19 +79,9 @@ end
 
 -- 1. New folder inside the selected folder -------------------------------
 
-local function newFolder(app)
-    local dest = selectedFolder()
-    dbg("newFolder: dest=%s", tostring(dest))
-    if not dest then
-        -- Nothing highlighted to retarget: stock New Folder, inline rename and all.
-        app:selectMenuItem({ "File", "New Folder" })
-        return
-    end
-
-    local button, name = hs.dialog.textPrompt(
-        "New Folder in “" .. basename(dest) .. "”",
-        "The window stays where it is, so name it here.",
-        "untitled folder", "Create", "Cancel")
+local function createFolder(app, dest, button, name)
+    -- Finder gets the keyboard back whatever the outcome.
+    app:activate()
     if button ~= "Create" then return end
     name = (name or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if name == "" then return end
@@ -109,6 +99,33 @@ return "ok"]], asStr(dest), asStr(name)))
         fail("Could not create “" .. name .. "”: " ..
             tostring(raw and raw.NSLocalizedDescription or "Finder refused"))
     end
+end
+
+local function newFolder(app)
+    local dest = selectedFolder()
+    dbg("newFolder: dest=%s", tostring(dest))
+    if not dest then
+        -- Nothing highlighted to retarget: stock New Folder, inline rename and all.
+        app:selectMenuItem({ "File", "New Folder" })
+        return
+    end
+
+    -- An alert from a background app opens unfocused, so the name field cannot
+    -- be typed into until it is clicked. Hammerspoon has to be the active app
+    -- BEFORE the alert is raised, and activation needs a run loop turn to land
+    -- — hence the hop through a timer rather than a busy wait.
+    local me = hs.application.get(hs.processInfo.processID)
+    if me then me:activate(true) end
+    hs.timer.doAfter(0.15, function()
+        dbg("newFolder: frontmost at prompt=%s",
+            tostring((hs.application.frontmostApplication() or {}).name
+                and hs.application.frontmostApplication():name()))
+        local button, name = hs.dialog.textPrompt(
+            "New Folder in “" .. basename(dest) .. "”",
+            "The window stays where it is, so name it here.",
+            "untitled folder", "Create", "Cancel")
+        createFolder(app, dest, button, name)
+    end)
 end
 
 -- 2. Copy the inline rename field's text ---------------------------------
