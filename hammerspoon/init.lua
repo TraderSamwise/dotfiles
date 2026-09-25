@@ -67,6 +67,10 @@ hs.hotkey.bind({"ctrl", "shift"}, "A", function()
   assignAppToDock(appName)
 end)
 
+hs.hotkey.bind({"ctrl", "shift"}, "L", function()
+  hs.execute("pmset displaysleepnow")
+end)
+
 require("hs.ipc")  -- enable `hs -c "..."` CLI
 
 -- Machine-private config (visor apps, NAS mounts, personal watchers) lives in the
@@ -158,6 +162,10 @@ end
 -- Omnibox Tab remap for Chrome + Ghost Browser (Tab -> Down, Shift+Tab -> Up)
 -- ONLY when the omnibox text field has focus. See omnibox_tab.lua.
 require("omnibox_tab")
+
+-- Finder fixes: Cmd+Shift+N into the selected folder, Cmd+C during inline
+-- rename copies the name text, Cmd+Shift+C / Cmd+Opt+C copy the path.
+require("finder_fixes")
 
 -- Auto-reload config on any .lua change in the Hammerspoon dir
 hs.pathwatcher.new(hs.configdir, function(files)
