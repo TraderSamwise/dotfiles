@@ -113,12 +113,14 @@ done
 for f in $(cd "$DOTFILES" && ls claude/skills/*/SKILL.md); do
   link "$f" "$HOME/.claude/${f#claude/}"
 done
-for f in $(cd "$DOTFILES" && find codex/skills -type f); do
-  link "$f" "$HOME/.codex/${f#codex/}"
+# Codex drops a skill whose SKILL.md is a symlink, so link the skill directory.
+for d in $(cd "$DOTFILES" && ls -d codex/skills/*/); do
+  d="${d%/}"
+  link "$d" "$HOME/.codex/${d#codex/}"
 done
 link bin/oneshot-secret "$HOME/.local/bin/oneshot-secret"
-link claude/skills/oneshot-secret/SKILL.md "$HOME/.codex/skills/oneshot-secret/SKILL.md"
-link claude/skills/queue/SKILL.md "$HOME/.codex/skills/queue/SKILL.md"
+link claude/skills/oneshot-secret "$HOME/.codex/skills/oneshot-secret"
+link claude/skills/queue "$HOME/.codex/skills/queue"
 link hammerspoon/init.lua "$HOME/.hammerspoon/init.lua"
 link hammerspoon/omnibox_tab.lua "$HOME/.hammerspoon/omnibox_tab.lua"
 link hammerspoon/vscode_swipe_nav.lua "$HOME/.hammerspoon/vscode_swipe_nav.lua"
