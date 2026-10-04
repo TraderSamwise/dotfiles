@@ -1,28 +1,13 @@
 #!/bin/bash
-# Restart the chrome-devtools-mcp proxy when it is unhealthy.
-#
-# Guards against two distinct failure modes:
-#
-#  1. Dead child / "Not connected" (the common one). `mcp-proxy --shell`
-#     propagates a dropped Claude client connection as stdin EOF to the
-#     stdio chrome-devtools-mcp child, which then logs "Parent death
-#     detected (stdin end)" and exits. launchd KeepAlive only watches the
-#     mcp-proxy process — which stays alive — so the dead child is never
-#     respawned and every tools/list returns -32603 "Not connected". We
-#     detect this by doing a real MCP handshake + tools/list against :9223
-#     and kickstart the unit if it fails. A single retry absorbs the
-#     transient window right after a restart while the wrapper polls Chrome.
-#
-#  2. Stale-connection pileup. Old Claude sessions leave ESTABLISHED TCP
-#     connections that never close, eventually wedging the proxy. Restart
-#     past a threshold.
+# Restart only when the MCP/CDP probe fails after retries.
+# Concurrent agent sessions legitimately exceed a fixed connection threshold.
+# A successful browser round trip is the health signal.
 
 set -uo pipefail
 
 LABEL="local.chrome-devtools-mcp"
 PORT=9223
 URL="http://127.0.0.1:${PORT}/mcp"
-MAX_CONNECTIONS=20
 TS="$(date)"
 
 restart() {
@@ -90,11 +75,7 @@ for attempt in 1 2 3 4; do
 done
 [ "$probe_ok" -eq 1 ] || restart "tools/list probe failed after retries (dead child / Not connected)"
 
-# Stale-connection pileup.
+# Count server endpoints for diagnostics, not as a failure signal.
 count=$(lsof -nP -iTCP:"$PORT" -sTCP:ESTABLISHED 2>/dev/null |
   awk -v port="$PORT" '$9 ~ (":" port "->") { count++ } END { print count+0 }')
-if [ "$count" -gt "$MAX_CONNECTIONS" ]; then
-  restart "$count ESTABLISHED connections on :$PORT (threshold $MAX_CONNECTIONS)"
-fi
-
 echo "$TS: healthy (tools/list OK, $count connections on :$PORT)"
