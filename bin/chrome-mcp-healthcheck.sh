@@ -91,7 +91,8 @@ done
 [ "$probe_ok" -eq 1 ] || restart "tools/list probe failed after retries (dead child / Not connected)"
 
 # Stale-connection pileup.
-count=$(lsof -i :$PORT 2>/dev/null | grep -c ESTABLISHED)
+count=$(lsof -nP -iTCP:"$PORT" -sTCP:ESTABLISHED 2>/dev/null |
+  awk -v port="$PORT" '$9 ~ (":" port "->") { count++ } END { print count+0 }')
 if [ "$count" -gt "$MAX_CONNECTIONS" ]; then
   restart "$count ESTABLISHED connections on :$PORT (threshold $MAX_CONNECTIONS)"
 fi
