@@ -31,12 +31,14 @@ def declared() -> dict:
         "codex_model": conf["codex"]["model"],
         "codex_effort": conf["codex"]["reasoning_effort"],
         "claude_model": conf["claude"]["model"],
+        "claude_effort": conf["claude"]["effort"],
     }
     override = conf.get("hosts", {}).get(host(), {})
     for key, section, field in (
         ("codex_model", "codex", "model"),
         ("codex_effort", "codex", "reasoning_effort"),
         ("claude_model", "claude", "model"),
+        ("claude_effort", "claude", "effort"),
     ):
         if section in override and field in override[section]:
             want[key] = override[section][field]
@@ -77,13 +79,16 @@ def apply_claude(want: dict, check: bool) -> list[str]:
     if not CLAUDE_SETTINGS.exists():
         return [f"claude: {CLAUDE_SETTINGS} missing"]
     settings = json.loads(CLAUDE_SETTINGS.read_text())
-    previous = settings.get("model")
-    if previous == want["claude_model"]:
-        return []
-    if not check:
-        settings["model"] = want["claude_model"]
+    drift = []
+    for field, wanted in (("model", want["claude_model"]), ("effortLevel", want["claude_effort"])):
+        previous = settings.get(field)
+        if previous == wanted:
+            continue
+        drift.append(f"claude: {field} {previous!r} -> {wanted!r}")
+        settings[field] = wanted
+    if drift and not check:
         CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
-    return [f"claude: model {previous!r} -> {want['claude_model']!r}"]
+    return drift
 
 
 def available_codex_models() -> list[str]:
@@ -113,7 +118,8 @@ def main() -> int:
         print(f"{host()}: UNREVIEWED codex model(s) available: {', '.join(unknown)} "
               f"(declared: {want['codex_model']}) - decide, then add to reviewed_models")
     if not drift:
-        print(f"{host()}: ok codex={want['codex_model']}/{want['codex_effort']} claude={want['claude_model']}")
+        print(f"{host()}: ok codex={want['codex_model']}/{want['codex_effort']} "
+              f"claude={want['claude_model']}/{want['claude_effort']}")
     return 1 if (drift and args.check) else 0
 
 
