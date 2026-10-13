@@ -1,8 +1,4 @@
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [[ -x /usr/local/bin/brew ]]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
+# Homebrew is set up in zshenv so non-login shells get it too.
 
 [[ -r "$HOME/.zprofile.local" ]] && . "$HOME/.zprofile.local"
 _sam_apply_tool_path_policy
