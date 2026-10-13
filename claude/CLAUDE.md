@@ -104,6 +104,36 @@ fallback: it forks the truth, drops the state machine, and leaves untracked
 files in a repo root one `git add -A` from being committed. That happened on
 2026-08-26 and I found it, not you.
 
+## Machine Provisioning And Management
+
+**We do not write deterministic multi-machine provisioning code.** Every machine
+has a different `$HOME`, OS, username and history, so a script that fans out over
+them either breaks or silently skips - and the usual tell is a `|| echo "failed"`
+that lets the run finish and print "Done." Converging machines is judgement work:
+an agent reads the real state of one machine, decides what is missing, fixes
+that, and verifies by reading it back.
+
+What each thing is for:
+
+- **Scripts** do one job on one machine, deterministically, and are testable:
+  `queue`, `oneshot-secret`, `git-merge`, `agent-config-apply`. Symlinking and
+  cloning are fine here - "link A to B" is not judgement.
+- **Declarations** are data, not logic: `agents/defaults.json` (which model
+  everything runs), `agents/machines.txt` (the inventory). One line to change.
+- **Skills** carry the sequencing, the per-machine judgement, and the gotchas -
+  `machines` is the one for this. New hard-won knowledge about a machine goes
+  there, not into another script.
+- **Agents** run the scripts, evaluate whether they actually worked, and heal
+  what did not.
+
+Two rules that follow from it:
+
+- **A step that fails must say so and fail the run.** Never swallow an error to
+  keep going; a provisioning run that reports success while three steps failed is
+  worse than one that stops.
+- **Fan-out is the agent's job, not a script's.** When something needs fixing on
+  every machine, read each one and converge it - do not write a loop over hosts.
+
 ## Editing Style
 
 - Comments must not exceed 3 lines unless explicitly approved.
@@ -112,14 +142,15 @@ files in a repo root one `git add -A` from being committed. That happened on
 - Do direct cutovers when refactoring or replacing systems; do not leave fallback, dual-path, or migration-state code unless explicitly asked.
 - If direct cutover seems risky, raise the risk before choosing an incremental path.
 
-## Deliverable Naming And Versioning
+## Deliverable Naming
 
-- NEVER name documents, files, or artifacts with finality/status labels like `final`, `FINAL`, `send-this`, `latest`, `done`, `current`, or `real`. It is never actually the final draft.
-- ALWAYS version explicitly with `v1`, `v2`, `v3`, … and increment on every revision. Applies to filenames, artifact titles, document headers, and any in-doc version/draft labels.
-- This covers everything I produce: local files, Google Drive docs, claude.ai artifacts, PDFs, etc.
+- Use stable, descriptive filenames for scripts, workflows, documents, and artifacts. Update them in place; do not append or increment `v1`/`v2`/`v3` suffixes unless Sam explicitly requests numbered deliverables.
+- Keep actual app, release, API, and data-format versions where technically required.
+- Never use finality/status labels like `final`, `FINAL`, `send-this`, `latest`, `done`, `current`, or `real` in artifact filenames.
 
 ## File Lookup
 
+- Non-web resources must not be given as links. Provide local files and artifacts as full absolute filesystem paths in inline code or code blocks; never use Markdown links, file URLs, or shortened path labels. Web URLs may be clickable links.
 - For files with known paths, read them directly instead of searching.
 - When Sam says "home <file>" or `~/<file>`, treat it as the literal path under `$HOME` first; do not reinterpret "home" as an app config directory unless he says config, settings, or dotdir.
 - Common root files are at the project root: `README.md`, `CHANGELOG.md`, `LICENSE`, `package.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore`, `.env.example`.
@@ -133,7 +164,9 @@ files in a repo root one `git add -A` from being committed. That happened on
 
 ## Hard Rules
 
-- Never use the chrome-devtools MCP unless told to in that message — it drives Sam's real browser.
+- For browser automation, use only Chrome MCP, and only when Sam explicitly requests it in that message.
+- Never use or request Computer Use/CUA or native app-control tools, and never ask Sam to grant their Accessibility or Screen Recording permissions.
+- CLI and API tools, including Vercel CLI, remain allowed. Use terminal checks, tests, and generated artifacts for verification without browser automation.
 
 ## Git And PRs
 
@@ -167,6 +200,40 @@ When I say "one at a time", "one by one", "next one", or similar, use a gated co
 5. Push/mark complete together.
 
 Do not chain through the list autonomously unless I explicitly say "do them autonomously", "just go", "batch them", or similar.
+
+## Autonomous Work
+
+**When I say full auto, plan-execute, "just go", "do them autonomously", or
+"batch them", you do not stop until the whole thing is done.** Finishing a
+phase is not a stopping point. Neither is a commit, a passing gate, a merged
+PR, or an interesting thing you want to tell me about.
+
+There is no such thing as "a good point to report". If you catch yourself
+writing one of these, delete it and call the next tool instead:
+
+- "Phase N complete. Three of five in; this is a good point to report."
+- "Before I continue, here's where things stand."
+- "Let me know if you want me to proceed with X."
+- a status table, a summary of what shipped, or a Done/Left list mid-run
+- any closing paragraph whose real content is "shall I carry on?"
+
+Report when the LAST phase is committed, not between phases. A one-line
+`Phase N complete (<sha>). Starting Phase N+1: <name>` is the most you say
+mid-run, and it is followed immediately by the next tool call in the same
+message — a message that ends in prose ends the turn, which is how this
+breaks.
+
+The only three reasons to stop early:
+
+1. A hard external blocker only I can clear — a missing credential, an account
+   you cannot create, a product decision the code genuinely cannot settle.
+   Not "I would like confirmation", and not a design call you are able to make
+   and state.
+2. Repeated genuine failure you cannot get past after honest retries.
+3. I told you to stop, or said "context switch".
+
+If you are unsure whether something is blocker-shaped: it is not. Make the
+call, state the assumption in one line, and keep building.
 
 ## Context Switch
 
@@ -205,6 +272,17 @@ loud before doing it. Everything else waits for master.
 - Keep logging minimal. No logging frameworks, tracers, buffering systems, or fancy table/grouped console output unless asked.
 
 ## Running Tests
+
+**At least 5x more time writing code than running tests.** If a session spends
+more time waiting on gates than producing changes, the gates were wrong, not the
+machine. On 2026-09-27 two hours of work contained ninety minutes of waiting —
+the inverse of this rule.
+
+**Never run a full test suite locally. It is CI's job, not mine.** No
+`yarn native:test`, no `yarn verify:full`, no `yarn release:readiness`, no bare
+`cargo test` across a crate. Run the specific targets covering what changed, plus
+the fast lane, and push. Waiting on CI is also not my job: a release is fire and
+forget.
 
 Run the test files covering what you changed, not the whole suite. Full-suite
 targets (`test-ci`, `test:ci`, `yarn test` at a monorepo root) exist to saturate

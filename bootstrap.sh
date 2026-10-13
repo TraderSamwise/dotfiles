@@ -21,6 +21,13 @@ for arg in "$@"; do
   esac
 done
 
+FAILED=()
+step() { # step <description> <command...>
+  if "${@:2}"; then return 0; fi
+  FAILED+=("$1")
+  echo "!! FAILED: $1" >&2
+}
+
 link() {
   local src="$DOTFILES/$1" dest="$2"
   if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
@@ -45,7 +52,7 @@ clone() {
     echo "ok     $dest"
     return
   fi
-  git clone --depth=1 "$url" "$dest" || echo "!! clone failed: $url (rerun once git and network work)" >&2
+  step "clone $url" git clone --depth=1 "$url" "$dest"
 }
 
 load_brew() {
@@ -160,13 +167,13 @@ else
   echo "skip   pre-commit hook ($DOTFILES is not a git checkout)"
 fi
 
-"$DOTFILES/bin/agent-config-apply" || echo "!! agent-config-apply failed" >&2
+step "agent models" "$DOTFILES/bin/agent-config-apply"
 
 if [ "$WITH_BREW" = 1 ]; then
-  brew bundle --file "$DOTFILES/Brewfile" || echo "!! brew bundle failed; rerun: brew bundle --file $DOTFILES/Brewfile" >&2
+  step "brew bundle" brew bundle --file "$DOTFILES/Brewfile"
 fi
 
-"$DOTFILES/volta/install.sh" || echo "!! Volta tools step failed" >&2
+step "volta tools" "$DOTFILES/volta/install.sh"
 
 # nvm owns `node` outside Volta-pinned projects; give a fresh machine an LTS default.
 export NVM_DIR="$HOME/.nvm"
@@ -182,14 +189,14 @@ if [ -s "$nvm_sh" ]; then
     else
       echo "ok     nvm default $(nvm version default)"
     fi
-  ) || echo "!! nvm LTS install failed" >&2
+  ) || { FAILED+=("nvm default node"); echo "!! FAILED: nvm default node" >&2; }
 else
   echo "!! nvm not installed (brew install nvm); skipped node default" >&2
 fi
 
 if ! command -v xkcdpass >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/xkcdpass" ]; then
   if command -v uv >/dev/null 2>&1; then
-    uv tool install xkcdpass || echo "!! uv tool install xkcdpass failed" >&2
+    step "xkcdpass" uv tool install xkcdpass
   else
     echo "skip   xkcdpass (needs uv; used by pw)"
   fi
@@ -200,19 +207,28 @@ if [ "$WITH_VSCODE" = 1 ]; then
 fi
 
 if [ "$WITH_CHROME_MCP" = 1 ]; then
-  "$DOTFILES/chrome-mcp/install.sh" || echo "!! Chrome MCP step failed" >&2
+  step "chrome mcp" "$DOTFILES/chrome-mcp/install.sh"
 fi
 
 if [ "$WITH_MACOS" = 1 ]; then
   "$DOTFILES/macos/defaults.sh"
 fi
 
+if [ ${#FAILED[@]} -gt 0 ]; then
+  echo
+  echo "INCOMPLETE - ${#FAILED[@]} step(s) failed:" >&2
+  for f in "${FAILED[@]}"; do echo "  - $f" >&2; done
+  echo "This machine is NOT at parity. Fix these, or ask Claude to (skill: machines)." >&2
+fi
+
 cat <<EOF
 
-Done. Machine-private config goes in files this repo never tracks:
+Done linking. Machine-private config goes in files this repo never tracks:
   ~/.zshenv.local    env every shell needs (tokens for scripts)
   ~/.zprofile.local  login-only env
   ~/.zshrc.local     interactive aliases, conda, work-only PATH
   ~/.gitconfig       [user] name/email, credential helpers
 Then: exec zsh
 EOF
+
+exit $(( ${#FAILED[@]} > 0 ))
