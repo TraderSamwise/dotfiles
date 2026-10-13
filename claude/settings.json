@@ -27,10 +27,6 @@
           {
             "type": "command",
             "command": "node ~/.claude/hooks/inject-repo-memory.js"
-          },
-          {
-            "type": "command",
-            "command": "~/.local/bin/agent-config-apply --quiet-ok"
           }
         ]
       }

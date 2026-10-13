@@ -101,7 +101,7 @@ for script in canary chrome-devtools-mcp-wrapper.sh chrome-mcp-healthcheck.sh ch
 done
 link bin/sync-codex-claude "$HOME/.local/bin/sync-codex-claude"
 link bin/agent-config-apply "$HOME/.local/bin/agent-config-apply"
-link bin/agent-config-doctor "$HOME/.local/bin/agent-config-doctor"
+link bin/agent-models "$HOME/.local/bin/agent-models"
 link claude/CLAUDE.md "$HOME/.claude/CLAUDE.md"
 link claude/statusline-command.sh "$HOME/.claude/statusline-command.sh"
 # Claude Code rewrites settings.json itself, so it is copied once rather than linked.
@@ -161,7 +161,6 @@ else
   echo "skip   pre-commit hook ($DOTFILES is not a git checkout)"
 fi
 
-"$DOTFILES/agents/install-timer.sh" || echo "!! agent-config timer install failed" >&2
 "$DOTFILES/bin/agent-config-apply" || echo "!! agent-config-apply failed" >&2
 
 if [ "$WITH_BREW" = 1 ]; then
