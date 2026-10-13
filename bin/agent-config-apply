@@ -105,6 +105,7 @@ def available_codex_models() -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="report drift, write nothing, exit 1 if any")
+    parser.add_argument("--quiet-ok", action="store_true", help="print nothing when already correct")
     args = parser.parse_args()
 
     want = declared()
@@ -117,7 +118,7 @@ def main() -> int:
     if unknown:
         print(f"{host()}: UNREVIEWED codex model(s) available: {', '.join(unknown)} "
               f"(declared: {want['codex_model']}) - decide, then add to reviewed_models")
-    if not drift:
+    if not drift and not args.quiet_ok:
         print(f"{host()}: ok codex={want['codex_model']}/{want['codex_effort']} "
               f"claude={want['claude_model']}/{want['claude_effort']}")
     return 1 if (drift and args.check) else 0

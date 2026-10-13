@@ -30,7 +30,7 @@
           },
           {
             "type": "command",
-            "command": "~/.local/bin/agent-config-apply >/dev/null 2>&1"
+            "command": "~/.local/bin/agent-config-apply --quiet-ok"
           }
         ]
       }
