@@ -101,7 +101,6 @@ for script in canary chrome-devtools-mcp-wrapper.sh chrome-mcp-healthcheck.sh ch
 done
 link bin/sync-codex-claude "$HOME/.local/bin/sync-codex-claude"
 link bin/agent-config-apply "$HOME/.local/bin/agent-config-apply"
-link bin/agent-models "$HOME/.local/bin/agent-models"
 link claude/CLAUDE.md "$HOME/.claude/CLAUDE.md"
 link claude/statusline-command.sh "$HOME/.claude/statusline-command.sh"
 # Claude Code rewrites settings.json itself, so it is copied once rather than linked.
