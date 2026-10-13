@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Report agent-model drift on this machine and, with --all, on every machine in
+# agents/machines.txt. Exits nonzero if any machine disagrees with the declared
+# defaults, so a timer or CI step can fail loudly instead of drifting quietly.
+#
+#   agent-config-doctor          # this machine
+#   agent-config-doctor --all    # every machine, over ssh
+#   agent-config-doctor --fix    # apply instead of report (add --all to fan out)
+set -uo pipefail
+
+DOTFILES="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}" || echo "${BASH_SOURCE[0]}")")/.." && pwd -P)"
+MACHINES="$DOTFILES/agents/machines.txt"
+ALL=0
+MODE="--check"
+
+for arg in "$@"; do
+  case "$arg" in
+    --all) ALL=1 ;;
+    --fix) MODE="" ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+rc=0
+
+run_local() {
+  "$DOTFILES/bin/agent-config-apply" $MODE || rc=1
+}
+
+run_remote() {
+  local host="$1" out
+  # The remote copy is whatever its own dotfiles checkout holds, so a machine
+  # behind on `git pull` is reported as unreachable config rather than silently
+  # checked against stale defaults.
+  # -n: without it ssh drains this loop's stdin and every later host is skipped.
+  if ! out="$(ssh -n -o ConnectTimeout=8 -o BatchMode=yes "$host" \
+      'test -x ~/cs/dotfiles/bin/agent-config-apply && ~/cs/dotfiles/bin/agent-config-apply '"$MODE" 2>&1)"; then
+    if [ -z "$out" ]; then
+      echo "$host: UNREACHABLE or no dotfiles checkout (~/cs/dotfiles/bin/agent-config-apply missing)"
+    else
+      echo "$out"
+    fi
+    rc=1
+    return
+  fi
+  echo "$out"
+}
+
+run_local
+
+if [ "$ALL" = 1 ]; then
+  while IFS= read -r host; do
+    case "$host" in ''|\#*) continue ;; esac
+    run_remote "$host"
+  done < "$MACHINES"
+fi
+
+if [ "$rc" != 0 ]; then
+  echo
+  echo "drift found. fix every machine with: agent-config-doctor --all --fix"
+fi
+exit $rc

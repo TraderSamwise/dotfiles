@@ -100,12 +100,34 @@ for script in canary chrome-devtools-mcp-wrapper.sh chrome-mcp-healthcheck.sh ch
   link "bin/$script" "$HOME/.local/bin/$script"
 done
 link bin/sync-codex-claude "$HOME/.local/bin/sync-codex-claude"
+link bin/agent-config-apply "$HOME/.local/bin/agent-config-apply"
+link bin/agent-config-doctor "$HOME/.local/bin/agent-config-doctor"
 link claude/CLAUDE.md "$HOME/.claude/CLAUDE.md"
 link claude/statusline-command.sh "$HOME/.claude/statusline-command.sh"
 # Claude Code rewrites settings.json itself, so it is copied once rather than linked.
 if [ ! -e "$HOME/.claude/settings.json" ]; then
+  mkdir -p "$HOME/.claude"
   cp "$DOTFILES/claude/settings.json" "$HOME/.claude/settings.json"
   echo "create $HOME/.claude/settings.json"
+else
+  # An existing machine keeps its own settings.json, so new hooks would never
+  # reach it. Merge just the agent-config hook in, idempotently.
+  python3 - "$HOME/.claude/settings.json" <<'MERGEHOOK'
+import json, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+st = json.loads(p.read_text())
+cmd = "~/.local/bin/agent-config-apply >/dev/null 2>&1"
+groups = st.setdefault("hooks", {}).setdefault("SessionStart", [])
+if not groups:
+    groups.append({"hooks": []})
+entries = groups[0].setdefault("hooks", [])
+if not any(h.get("command", "").startswith("~/.local/bin/agent-config-apply") for h in entries):
+    entries.append({"type": "command", "command": cmd})
+    p.write_text(json.dumps(st, indent=2) + "\n")
+    print("hook   SessionStart agent-config-apply")
+else:
+    print("ok     SessionStart agent-config-apply")
+MERGEHOOK
 fi
 for f in $(cd "$DOTFILES" && ls claude/commands/*.md claude/hooks/*.js); do
   link "$f" "$HOME/.claude/${f#claude/}"
@@ -138,6 +160,9 @@ if git -C "$DOTFILES" rev-parse --git-dir >/dev/null 2>&1; then
 else
   echo "skip   pre-commit hook ($DOTFILES is not a git checkout)"
 fi
+
+"$DOTFILES/agents/install-timer.sh" || echo "!! agent-config timer install failed" >&2
+"$DOTFILES/bin/agent-config-apply" || echo "!! agent-config-apply failed" >&2
 
 if [ "$WITH_BREW" = 1 ]; then
   brew bundle --file "$DOTFILES/Brewfile" || echo "!! brew bundle failed; rerun: brew bundle --file $DOTFILES/Brewfile" >&2

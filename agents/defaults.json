@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "The single declaration of which model every agent CLI uses on every machine.",
+    "Nothing else may name a model: agent-config-apply writes these into",
+    "~/.codex/config.toml and ~/.claude/settings.json; agent-config-doctor fails",
+    "when a machine disagrees. Codex rewrites its own config whenever its model",
+    "picker is used, so apply runs on a timer and at Claude session start rather",
+    "than once at provisioning.",
+    "JSON, not TOML, so it parses with the stdlib on any python3 (strix and the",
+    "Macs disagree on what `python3` resolves to, and tomllib needs 3.11+).",
+    "reviewed_models: codex models already considered. Anything Codex offers that is NOT listed here is reported by the doctor as a decision to make - that is the trigger for 'a cheaper/newer model shipped'.",
+    "claude.model matches claude/settings.json in this repo - change both together, or agent-config-apply and a fresh bootstrap will disagree."
+  ],
+  "codex": {
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "high"
+  },
+  "claude": {
+    "model": "opus[1m]"
+  },
+  "hosts": {},
+  "reviewed_models": [
+    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-6-astra",
+    "gpt-6.1-sol"
+  ]
+}

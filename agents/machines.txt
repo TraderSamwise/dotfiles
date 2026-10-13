@@ -1,0 +1,6 @@
+# Every machine that runs agent CLIs. One ssh target per line (as named in
+# ~/.ssh/config), comments and blank lines ignored. Adding a machine is one line
+# here; agent-config-doctor and any future fan-out read this and nothing else.
+sam-mbp2
+sam-mini
+sam-strix
