@@ -35,7 +35,7 @@ run_remote() {
   # checked against stale defaults.
   # -n: without it ssh drains this loop's stdin and every later host is skipped.
   if ! out="$(ssh -n -o ConnectTimeout=8 -o BatchMode=yes "$host" \
-      'test -x ~/cs/dotfiles/bin/agent-config-apply && ~/cs/dotfiles/bin/agent-config-apply '"$MODE" 2>&1)"; then
+      'git -C ~/cs/dotfiles pull --ff-only -q 2>/dev/null; test -x ~/cs/dotfiles/bin/agent-config-apply && ~/cs/dotfiles/bin/agent-config-apply '"$MODE" 2>&1)"; then
     if [ -z "$out" ]; then
       echo "$host: UNREACHABLE or no dotfiles checkout (~/cs/dotfiles/bin/agent-config-apply missing)"
     else
