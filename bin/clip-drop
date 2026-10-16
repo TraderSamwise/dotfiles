@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Put the clipboard image at the SAME path on this machine and every machine in
+# agents/machines.txt, then print that path.
+#
+# mosh and ssh carry text, not files. Pasting a screenshot into an agent running
+# on another machine types a local $TMPDIR path the remote has never seen - and
+# each Mac's $TMPDIR is a different per-user container, so it can never resolve.
+#
+# Detecting which host a terminal pane is mosh'd into is fragile (multiplexed
+# panes, mosh-client knowing only an IP). Broadcasting a ~100KB PNG to every
+# machine is not, and it means the printed path is correct wherever you paste it.
+#
+# Exits 1 silently when the clipboard holds no image, so a hotkey can fall
+# through to a normal paste.
+set -uo pipefail
+
+DOTFILES="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}" || echo "${BASH_SOURCE[0]}")")/.." && pwd -P)"
+MACHINES="$DOTFILES/agents/machines.txt"
+DROP_DIR="/tmp/agent-clip-drops"
+STAMP="$(date +%Y-%m-%d-%H%M%S)-$$"
+REMOTE="$DROP_DIR/clip-$STAMP.png"
+
+mkdir -p "$DROP_DIR"
+if ! /opt/homebrew/bin/pngpaste "$REMOTE" 2>/dev/null; then
+  rm -f "$REMOTE"
+  exit 1
+fi
+
+ME="$(hostname -s)"
+FAILED=()
+for host in $(grep -vE '^[[:space:]]*(#|$)' "$MACHINES"); do
+  [ "$host" = "$ME" ] && continue
+  if ! ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$host" "mkdir -p $DROP_DIR" 2>/dev/null \
+     || ! scp -q -o ConnectTimeout=5 -o BatchMode=yes "$REMOTE" "$host:$REMOTE" 2>/dev/null; then
+    FAILED+=("$host")
+  fi
+done
+
+# The path still works locally and on whichever machines did get it, so print it
+# either way - but never pretend every machine has the file.
+[ ${#FAILED[@]} -gt 0 ] && printf 'clip-drop: failed to reach %s\n' "${FAILED[*]}" >&2
+printf '%s' "$REMOTE"
