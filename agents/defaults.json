@@ -10,7 +10,8 @@
     "Macs disagree on what `python3` resolves to, and tomllib needs 3.11+).",
     "reviewed_models: codex models already considered. Anything Codex offers that is NOT listed here is reported by the doctor as a decision to make - that is the trigger for 'a cheaper/newer model shipped'.",
     "claude.model matches claude/settings.json in this repo - change both together, or agent-config-apply and a fresh bootstrap will disagree.",
-    "claude.model is an ALIAS ('opus', 'opus[1m]') on purpose: Claude Code resolves an alias to the latest model in that line, so a new Opus is picked up with no edit. Codex has no alias - its model must be pinned, which is why the doctor reports unreviewed codex models."
+    "claude.model is an ALIAS ('opus', 'opus[1m]') on purpose: Claude Code resolves an alias to the latest model in that line, so a new Opus is picked up with no edit. Codex has no alias - its model must be pinned, which is why the doctor reports unreviewed codex models.",
+    "claude_gpt is opt-in for claude --gpt. claude-router reads it per invocation; agent-config-apply keeps native Claude settings native. proxy_version is a deliberately reviewed release, not an automatic upgrade."
   ],
   "codex": {
     "model": "gpt-6.1-sol",
@@ -19,6 +20,13 @@
   "claude": {
     "model": "opus[1m]",
     "effort": "high"
+  },
+  "claude_gpt": {
+    "model": "gpt-6.1-sol[1m]",
+    "small_model": "gpt-6-luna",
+    "auto_compact_window": 900000,
+    "proxy_version": "0.5.1",
+    "port": 18765
   },
   "hosts": {},
   "reviewed_models": [

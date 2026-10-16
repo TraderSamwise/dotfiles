@@ -151,6 +151,7 @@ done
 link bin/oneshot-secret "$HOME/.local/bin/oneshot-secret"
 link claude/skills/oneshot-secret "$HOME/.codex/skills/oneshot-secret"
 link claude/skills/queue "$HOME/.codex/skills/queue"
+link claude/skills/machines "$HOME/.codex/skills/machines"
 link hammerspoon/init.lua "$HOME/.hammerspoon/init.lua"
 link hammerspoon/omnibox_tab.lua "$HOME/.hammerspoon/omnibox_tab.lua"
 link hammerspoon/vscode_swipe_nav.lua "$HOME/.hammerspoon/vscode_swipe_nav.lua"

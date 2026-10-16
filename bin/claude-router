@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Opt-in GPT launches and the local claude-codex LaunchAgent."""
+"""Opt-in GPT launches and a machine-local launchd or systemd service."""
 import json
 import os
 from pathlib import Path
@@ -13,22 +13,28 @@ import urllib.error
 import urllib.request
 
 HOME = Path.home()
+DEFAULTS = Path(__file__).resolve().parent.parent / "agents/defaults.json"
+CONFIG = json.loads(DEFAULTS.read_text())["claude_gpt"]
+LINUX = sys.platform.startswith("linux")
 LABEL = "local.claude-codex-proxy"
 DOMAIN = f"gui/{os.getuid()}"
 JOB = f"{DOMAIN}/{LABEL}"
 PLIST = HOME / "Library/LaunchAgents" / f"{LABEL}.plist"
+UNIT_NAME = "claude-codex-proxy.service"
+UNIT = HOME / ".config/systemd/user" / UNIT_NAME
 BINARY = HOME / ".local/bin/claude-codex"
 STATE = HOME / ".local/state/claude-code-proxy"
-URL = "http://127.0.0.1:18765"
-GPT_MODEL = "gpt-6.1-sol[1m]"
+PORT = CONFIG["port"]
+URL = f"http://127.0.0.1:{PORT}"
+GPT_MODEL = CONFIG["model"]
 GPT_ENV = {
     "ANTHROPIC_BASE_URL": URL,
     "ANTHROPIC_DEFAULT_OPUS_MODEL": GPT_MODEL,
     "ANTHROPIC_DEFAULT_SONNET_MODEL": GPT_MODEL,
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-6-luna",
-    "ANTHROPIC_SMALL_FAST_MODEL": "gpt-6-luna",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": CONFIG["small_model"],
+    "ANTHROPIC_SMALL_FAST_MODEL": CONFIG["small_model"],
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(CONFIG["auto_compact_window"]),
 }
 
 
@@ -93,18 +99,55 @@ def launchctl(*args, check=True):
                           capture_output=True, text=True, timeout=10)
 
 
+def systemctl(*args, check=True):
+    return subprocess.run(["/usr/bin/systemctl", "--user", *args], check=check,
+                          capture_output=True, text=True, timeout=10)
+
+
+def service_state():
+    if LINUX:
+        return systemctl("show", "--property=ActiveState,SubState,MainPID,ExecMainStatus",
+                         UNIT_NAME, check=False)
+    return launchctl("print", JOB, check=False)
+
+
 def loaded():
+    if LINUX:
+        return systemctl("is-active", "--quiet", UNIT_NAME, check=False).returncode == 0
     return launchctl("print", JOB, check=False).returncode == 0
+
+
+def unit_quote(value, expand_dollars=False):
+    value = str(value).replace("%", "%%")
+    if expand_dollars:
+        value = value.replace("$", "$$")
+    return json.dumps(value, ensure_ascii=False)
 
 
 def install():
     if not BINARY.is_file() or not os.access(BINARY, os.X_OK):
         raise RuntimeError(f"Install claude-codex first: {BINARY}")
-    PLIST.parent.mkdir(parents=True, exist_ok=True)
     STATE.mkdir(parents=True, exist_ok=True)
+    if LINUX:
+        UNIT.parent.mkdir(parents=True, exist_ok=True)
+        executable = unit_quote(BINARY, expand_dollars=True)
+        home = unit_quote(f"HOME={HOME}")
+        text = ("[Unit]\nDescription=Claude Code GPT proxy\n\n[Service]\nType=exec\n"
+                f"ExecStart={executable} serve --no-monitor --port {PORT}\n"
+                f"Environment={home}\nRestart=always\nRestartSec=30\n\n"
+                "[Install]\nWantedBy=default.target\n")
+        temporary = UNIT.with_suffix(".service.tmp")
+        temporary.write_text(text)
+        temporary.replace(UNIT)
+        systemctl("daemon-reload")
+        print(f"Installed {UNIT}; run claude-router start to enable and start it")
+        return
+    if sys.platform != "darwin":
+        raise RuntimeError("Service management supports macOS and Linux only")
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
     config = {
         "Label": LABEL,
-        "ProgramArguments": [str(BINARY), "serve", "--no-monitor", "--port", "18765"],
+        "ProgramArguments": [str(BINARY), "serve", "--no-monitor", "--port", str(PORT)],
         "EnvironmentVariables": {"HOME": str(HOME)},
         "RunAtLoad": True,
         "KeepAlive": True,
@@ -120,7 +163,10 @@ def install():
 
 
 def job_pid():
-    result = launchctl("print", JOB, check=False)
+    result = service_state()
+    if LINUX:
+        match = re.search(r"^MainPID=(\d+)$", result.stdout, re.MULTILINE)
+        return int(match[1]) or None if match else None
     match = re.search(r"^\s*pid = (\d+)$", result.stdout, re.MULTILINE)
     return int(match[1]) if match else None
 
@@ -132,32 +178,42 @@ def wait_healthy(previous_pid=None):
             print("GPT proxy healthy at " + URL)
             return
         time.sleep(0.25)
-    state = launchctl("print", JOB, check=False)
+    state = service_state()
     raise RuntimeError(f"Proxy did not become healthy: {health()}\n{state.stdout or state.stderr}"
-                       f"\nLogs: {STATE}/launchd.stderr.log")
+                       "\nLogs: claude-router logs")
 
 
 def start():
-    if not PLIST.is_file():
-        raise RuntimeError("LaunchAgent missing. Run: claude-router install")
+    definition = UNIT if LINUX else PLIST
+    if not definition.is_file():
+        raise RuntimeError("Service definition missing. Run: claude-router install")
     if not loaded():
         with socket.socket() as connection:
             connection.settimeout(1)
-            if connection.connect_ex(("127.0.0.1", 18765)) == 0:
-                raise RuntimeError("Port 18765 is in use outside launchd. Stop its owner before starting launchd.")
-        launchctl("enable", JOB)
-        launchctl("bootstrap", DOMAIN, str(PLIST))
+            if connection.connect_ex(("127.0.0.1", PORT)) == 0:
+                raise RuntimeError(f"Port {PORT} is in use outside the managed service. Stop its owner first.")
+        if LINUX:
+            systemctl("enable", "--now", UNIT_NAME)
+        else:
+            launchctl("enable", JOB)
+            launchctl("bootstrap", DOMAIN, str(PLIST))
     else:
-        launchctl("kickstart", JOB)
+        if LINUX:
+            systemctl("start", UNIT_NAME)
+        else:
+            launchctl("kickstart", JOB)
     wait_healthy()
 
 
 def stop():
     if loaded():
-        launchctl("bootout", JOB)
+        if LINUX:
+            systemctl("stop", UNIT_NAME)
+        else:
+            launchctl("bootout", JOB)
         print("GPT proxy stopped")
     else:
-        print("GPT proxy LaunchAgent is not loaded")
+        print("GPT proxy service is not running")
 
 
 def main(args):
@@ -173,7 +229,10 @@ def main(args):
     elif command == "restart":
         if loaded():
             previous_pid = job_pid()
-            launchctl("kickstart", "-k", JOB)
+            if LINUX:
+                systemctl("restart", UNIT_NAME)
+            else:
+                launchctl("kickstart", "-k", JOB)
             wait_healthy(previous_pid)
         else:
             start()
@@ -183,17 +242,25 @@ def main(args):
             raise RuntimeError(problem)
         print("GPT proxy healthy")
     elif command == "status":
-        print(subprocess.check_output([str(BINARY), "--version"], text=True).strip())
-        state = launchctl("print", JOB, check=False)
-        print("LaunchAgent: " + ("loaded" if state.returncode == 0 else "not loaded"))
+        actual = subprocess.check_output([str(BINARY), "--version"], text=True).strip()
+        version_ok = re.search(r"\bv?" + re.escape(CONFIG["proxy_version"]) + r"\b", actual) is not None
+        print(actual + f" (declared: {CONFIG['proxy_version']})")
+        state = service_state()
+        print("Service manager: " + ("systemd user" if LINUX else "launchd"))
+        if state.returncode:
+            print(state.stderr.strip() or "Service is not loaded")
         for line in state.stdout.splitlines():
-            if line.strip().startswith(("state =", "pid =", "last exit code =")):
+            if line.strip().startswith(("state =", "pid =", "last exit code =", "ActiveState=",
+                                        "SubState=", "MainPID=", "ExecMainStatus=")):
                 print(line.strip())
         problem = health()
         print("Health: " + (problem or "ok"))
-        print("Logs: " + str(STATE))
-        return 1 if problem else 0
+        print("Logs: " + ("claude-router logs (systemd journal)" if LINUX else str(STATE)))
+        return 1 if problem or not version_ok or not loaded() else 0
     elif command == "logs":
+        if LINUX:
+            os.execv("/usr/bin/journalctl", ["journalctl", "--user", "--unit", UNIT_NAME,
+                                           "--follow", "--lines=60"])
         os.execv("/usr/bin/tail", ["tail", "-n", "60", "-F",
                                 str(STATE / "launchd.stdout.log"), str(STATE / "launchd.stderr.log")])
     else:

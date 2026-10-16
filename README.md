@@ -109,8 +109,18 @@ Install the third-party `fcakyon/claude-code-with-codex` binary separately as
 `~/.local/bin/claude-codex`, then run `claude-router install` and `claude-router start`.
 The macOS LaunchAgent keeps one proxy on `127.0.0.1:18765` across terminal exits
 and restarts it after a crash. `claude-router status`, `health`, `restart`, `stop`,
-and `logs` control that service. Native Claude does not depend on it. The helper
-uses macOS `/usr/bin/python3`; neither Claude's package nor its updater is modified.
+and `logs` control that service. Linux uses an enabled systemd user service and
+the same commands; headless hosts need user lingering for startup before login.
+Native Claude does not depend on the service. The helper uses `/usr/bin/python3`;
+neither Claude's package nor its updater is modified.
+
+This is a standard layer of the `machines` provisioning skill, available to
+Claude and Codex through bootstrap. `agents/defaults.json` → `claude_gpt` declares
+the GPT model, small model, context threshold, reviewed proxy release and local
+port. The helper reads that declaration per invocation. Installing a service
+definition is separate from starting it, so provisioning can preserve active
+work. Converge each machine individually; the workflow covers auth, service
+startup, health, restart and a real GPT response.
 
 ## Chrome DevTools MCP
 

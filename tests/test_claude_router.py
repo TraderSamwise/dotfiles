@@ -2,6 +2,7 @@ import importlib.machinery
 import json
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +13,70 @@ router = importlib.machinery.SourceFileLoader("claude_router", str(ROOT / "bin/c
 
 
 class ClaudeRouterTests(unittest.TestCase):
+    def test_status_rejects_an_unmanaged_healthy_listener(self):
+        state = subprocess.CompletedProcess([], 1, "", "not loaded")
+        with patch.object(router.subprocess, "check_output", return_value="claude-codex " + router.CONFIG["proxy_version"]), \
+                patch.object(router, "service_state", return_value=state), \
+                patch.object(router, "loaded", return_value=False), patch.object(router, "health", return_value=None):
+            self.assertEqual(router.main(["status"]), 1)
+
+    def test_macos_install_uses_this_users_home_and_does_not_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "different user"
+            binary = home / ".local/bin/claude-codex"
+            binary.parent.mkdir(parents=True)
+            binary.touch()
+            binary.chmod(0o755)
+            plist = home / "Library/LaunchAgents/proxy.plist"
+            with patch.multiple(router, HOME=home, BINARY=binary, PLIST=plist,
+                                STATE=home / "state", LINUX=False), \
+                    patch.object(router.sys, "platform", "darwin"), patch.object(router, "launchctl") as control:
+                router.install()
+                control.assert_not_called()
+            config = plistlib.loads(plist.read_bytes())
+            self.assertEqual(config["ProgramArguments"][0], str(binary))
+            self.assertEqual(config["EnvironmentVariables"], {"HOME": str(home)})
+            self.assertEqual(config["ProgramArguments"][-1], str(router.PORT))
+            self.assertTrue(config["KeepAlive"])
+
+    def test_linux_install_and_restart_use_user_systemd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "linux user"
+            binary = home / ".local/bin/claude-codex"
+            binary.parent.mkdir(parents=True)
+            binary.touch()
+            binary.chmod(0o755)
+            unit = home / ".config/systemd/user" / router.UNIT_NAME
+            with patch.multiple(router, HOME=home, BINARY=binary, UNIT=unit,
+                                STATE=home / "state", LINUX=True), \
+                    patch.object(router, "systemctl") as control, patch.object(router, "launchctl") as mac:
+                router.install()
+                control.assert_called_once_with("daemon-reload")
+                text = unit.read_text()
+                self.assertIn(f'ExecStart="{binary}" serve --no-monitor --port {router.PORT}', text)
+                self.assertIn(f'Environment="HOME={home}"', text)
+                self.assertIn("Restart=always", text)
+                mac.assert_not_called()
+                control.reset_mock()
+                with patch.object(router, "loaded", return_value=True), \
+                        patch.object(router, "job_pid", return_value=123), \
+                        patch.object(router, "wait_healthy") as wait:
+                    router.main(["restart"])
+                    control.assert_called_once_with("restart", router.UNIT_NAME)
+                    wait.assert_called_once_with(123)
+
+    def test_linux_inactive_pid_and_start_enable_the_service(self):
+        result = subprocess.CompletedProcess([], 0, "MainPID=0\nActiveState=inactive", "")
+        with patch.object(router, "LINUX", True), patch.object(router, "service_state", return_value=result):
+            self.assertIsNone(router.job_pid())
+        with patch.object(router, "LINUX", True), patch.object(router, "UNIT") as unit, \
+                patch.object(router, "loaded", return_value=False), patch.object(router, "socket") as sockets, \
+                patch.object(router, "systemctl") as control, patch.object(router, "wait_healthy"):
+            unit.is_file.return_value = True
+            sockets.socket.return_value.__enter__.return_value.connect_ex.return_value = 1
+            router.start()
+            control.assert_called_once_with("enable", "--now", router.UNIT_NAME)
+
     def test_flag_dispatches_after_aimux_arguments(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / ".local/bin/claude-router"
@@ -107,7 +172,7 @@ class ClaudeRouterTests(unittest.TestCase):
                 patch.object(router.time, "sleep"):
             router.wait_healthy(previous_pid=12)
         with patch.object(router, "job_pid", return_value=12), patch.object(router, "health", return_value="down"), \
-                patch.object(router.time, "sleep"), patch.object(router, "launchctl") as control:
+                patch.object(router.time, "sleep"), patch.object(router, "service_state") as control:
             control.return_value.stdout = "last exit code = 1"
             with self.assertRaisesRegex(RuntimeError, "last exit code = 1"):
                 router.wait_healthy(previous_pid=12)
