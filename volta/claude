@@ -1,0 +1,8 @@
+#!/bin/sh
+for arg do
+  case "$arg" in
+    --) break ;;
+    --gpt) exec /usr/bin/python3 "$HOME/.local/bin/claude-router" gpt "$@" ;;
+  esac
+done
+exec "$HOME/.volta/bin/claude" "$@"

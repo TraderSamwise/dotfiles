@@ -103,6 +103,7 @@ link opencode/opencode.json "$HOME/.config/opencode/opencode.json"
 link bin/git-merge "$HOME/.local/bin/git-merge"
 link bin/cs "$HOME/.local/bin/cs"
 link bin/queue "$HOME/.local/bin/queue"
+link bin/claude-router "$HOME/.local/bin/claude-router"
 for script in canary chrome-devtools-mcp-wrapper.sh chrome-mcp-healthcheck.sh chrome-mcp-log-trim.sh chrome-mcp-restart; do
   link "bin/$script" "$HOME/.local/bin/$script"
 done

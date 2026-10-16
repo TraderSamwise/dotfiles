@@ -1,0 +1,210 @@
+#!/usr/bin/python3
+"""Opt-in GPT launches and the local claude-codex LaunchAgent."""
+import json
+import os
+from pathlib import Path
+import plistlib
+import re
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+HOME = Path.home()
+LABEL = "local.claude-codex-proxy"
+DOMAIN = f"gui/{os.getuid()}"
+JOB = f"{DOMAIN}/{LABEL}"
+PLIST = HOME / "Library/LaunchAgents" / f"{LABEL}.plist"
+BINARY = HOME / ".local/bin/claude-codex"
+STATE = HOME / ".local/state/claude-code-proxy"
+URL = "http://127.0.0.1:18765"
+GPT_MODEL = "gpt-6.1-sol[1m]"
+GPT_ENV = {
+    "ANTHROPIC_BASE_URL": URL,
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": GPT_MODEL,
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": GPT_MODEL,
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-6-luna",
+    "ANTHROPIC_SMALL_FAST_MODEL": "gpt-6-luna",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000",
+}
+
+
+def request(path):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(URL + path, timeout=2) as response:
+        return json.load(response)
+
+
+def health():
+    try:
+        if request("/healthz").get("ok") is not True:
+            return "proxy returned an unhealthy response"
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        return str(error)
+    return None
+
+
+def prepare_gpt(args):
+    end = args.index("--") if "--" in args else len(args)
+    options = [arg for arg in args[:end] if arg != "--gpt"]
+    tail = args[end:]
+    settings_index = next((i for i, arg in enumerate(options)
+                           if arg == "--settings" or arg.startswith("--settings=")), None)
+    settings = {}
+    if settings_index is not None:
+        arg = options[settings_index]
+        if arg == "--settings":
+            if settings_index + 1 >= len(options):
+                raise ValueError("--settings requires JSON or a file path")
+            value = options[settings_index + 1]
+        else:
+            value = arg.split("=", 1)[1]
+        source = value if value.lstrip().startswith("{") else Path(value).read_text()
+        settings = json.loads(source)
+        if not isinstance(settings, dict) or not isinstance(settings.get("env", {}), dict):
+            raise ValueError("--settings and its env field must be JSON objects")
+    settings["env"] = {**settings.get("env", {}), **GPT_ENV}
+    merged = json.dumps(settings, separators=(",", ":"))
+    if settings_index is None:
+        options[0:0] = ["--settings", merged]
+    elif options[settings_index] == "--settings":
+        options[settings_index + 1] = merged
+    else:
+        options[settings_index] = "--settings=" + merged
+    if not any(arg == "--model" or arg.startswith("--model=") for arg in options):
+        options[0:0] = ["--model", GPT_MODEL]
+    return options + tail
+
+
+def launch_gpt(args):
+    prepared = prepare_gpt(args)
+    problem = health()
+    if problem:
+        raise RuntimeError(f"GPT proxy unavailable: {problem}. Run: claude-router start")
+    executable = str(HOME / ".volta/bin/claude")
+    os.execve(executable, [executable, *prepared], {**os.environ, **GPT_ENV})
+
+
+def launchctl(*args, check=True):
+    return subprocess.run(["/bin/launchctl", *args], check=check,
+                          capture_output=True, text=True, timeout=10)
+
+
+def loaded():
+    return launchctl("print", JOB, check=False).returncode == 0
+
+
+def install():
+    if not BINARY.is_file() or not os.access(BINARY, os.X_OK):
+        raise RuntimeError(f"Install claude-codex first: {BINARY}")
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
+    STATE.mkdir(parents=True, exist_ok=True)
+    config = {
+        "Label": LABEL,
+        "ProgramArguments": [str(BINARY), "serve", "--no-monitor", "--port", "18765"],
+        "EnvironmentVariables": {"HOME": str(HOME)},
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ThrottleInterval": 30,
+        "StandardOutPath": str(STATE / "launchd.stdout.log"),
+        "StandardErrorPath": str(STATE / "launchd.stderr.log"),
+    }
+    temporary = PLIST.with_suffix(".plist.tmp")
+    with temporary.open("wb") as output:
+        plistlib.dump(config, output)
+    temporary.replace(PLIST)
+    print(f"Installed {PLIST}")
+
+
+def job_pid():
+    result = launchctl("print", JOB, check=False)
+    match = re.search(r"^\s*pid = (\d+)$", result.stdout, re.MULTILINE)
+    return int(match[1]) if match else None
+
+
+def wait_healthy(previous_pid=None):
+    for _ in range(20):
+        pid = job_pid()
+        if pid and pid != previous_pid and not health():
+            print("GPT proxy healthy at " + URL)
+            return
+        time.sleep(0.25)
+    state = launchctl("print", JOB, check=False)
+    raise RuntimeError(f"Proxy did not become healthy: {health()}\n{state.stdout or state.stderr}"
+                       f"\nLogs: {STATE}/launchd.stderr.log")
+
+
+def start():
+    if not PLIST.is_file():
+        raise RuntimeError("LaunchAgent missing. Run: claude-router install")
+    if not loaded():
+        with socket.socket() as connection:
+            connection.settimeout(1)
+            if connection.connect_ex(("127.0.0.1", 18765)) == 0:
+                raise RuntimeError("Port 18765 is in use outside launchd. Stop its owner before starting launchd.")
+        launchctl("enable", JOB)
+        launchctl("bootstrap", DOMAIN, str(PLIST))
+    else:
+        launchctl("kickstart", JOB)
+    wait_healthy()
+
+
+def stop():
+    if loaded():
+        launchctl("bootout", JOB)
+        print("GPT proxy stopped")
+    else:
+        print("GPT proxy LaunchAgent is not loaded")
+
+
+def main(args):
+    command = args[0] if args else "status"
+    if command == "gpt":
+        launch_gpt(args[1:])
+    elif command == "install":
+        install()
+    elif command == "start":
+        start()
+    elif command == "stop":
+        stop()
+    elif command == "restart":
+        if loaded():
+            previous_pid = job_pid()
+            launchctl("kickstart", "-k", JOB)
+            wait_healthy(previous_pid)
+        else:
+            start()
+    elif command == "health":
+        problem = health()
+        if problem:
+            raise RuntimeError(problem)
+        print("GPT proxy healthy")
+    elif command == "status":
+        print(subprocess.check_output([str(BINARY), "--version"], text=True).strip())
+        state = launchctl("print", JOB, check=False)
+        print("LaunchAgent: " + ("loaded" if state.returncode == 0 else "not loaded"))
+        for line in state.stdout.splitlines():
+            if line.strip().startswith(("state =", "pid =", "last exit code =")):
+                print(line.strip())
+        problem = health()
+        print("Health: " + (problem or "ok"))
+        print("Logs: " + str(STATE))
+        return 1 if problem else 0
+    elif command == "logs":
+        os.execv("/usr/bin/tail", ["tail", "-n", "60", "-F",
+                                str(STATE / "launchd.stdout.log"), str(STATE / "launchd.stderr.log")])
+    else:
+        raise ValueError("Usage: claude-router {install|start|stop|restart|status|health|logs}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
+        print("claude-router: " + (detail or str(error)), file=sys.stderr)
+        sys.exit(1)
