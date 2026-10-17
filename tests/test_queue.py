@@ -101,22 +101,85 @@ class QueueCase(unittest.TestCase):
         self.assertIn("belongs to claude-overseer, assigned to codex-worker", result.stderr)
         self.assertIn("you are codex-other", result.stderr)
 
-    def test_done_still_requires_proof_for_assigned_agent(self):
+    def test_done_requires_nothing(self):
+        """
+        2026-10-17: "done requires nothing holy fuck. done should be the first
+        thing you do the second you are done." Requiring evidence is what
+        taught agents to sit on `doing` assembling it.
+        """
         item_id = self.add_item()
         self.start_item(item_id, assignee="codex-worker")
 
-        result = self.run_queue(
-            "codex-worker",
-            "done",
-            item_id,
-            "--commit",
-            "abc1234",
-            "--clauses",
-            "1 requirement: DONE",
-        )
+        result = self.run_queue("codex-worker", "done", item_id)
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("done requires --proof", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("done", result.stdout)
+
+    def test_todo_can_close_without_passing_through_doing(self):
+        item_id = self.add_item()
+
+        result = self.run_queue("claude-overseer", "done", item_id)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("todo", result.stdout)
+        self.assertIn("done", result.stdout)
+
+    def test_delete_removes_an_item_from_every_view(self):
+        item_id = self.add_item()
+
+        deleted = self.run_queue("claude-overseer", "delete", item_id, "--why", "cannot reproduce")
+        self.assertEqual(deleted.returncode, 0, deleted.stderr)
+
+        for view in (["ls"], ["ls", "--everything"], ["backlog"]):
+            listing = self.run_queue("claude-overseer", *view)
+            self.assertNotIn(item_id, listing.stdout, f"{view} still shows it")
+        # The log keeps every event: a delete is a tombstone, not a rewrite.
+        self.assertIn('"kind": "delete"', self.queue_log().read_text())
+
+    def _old_todo(self, item_id, days):
+        from datetime import datetime, timedelta, timezone
+
+        when = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+        return {
+            "id": item_id,
+            "workId": item_id,
+            "kind": "add",
+            "at": when,
+            "ask": f"queued {days} days ago",
+            "by": "sam",
+            "tree": self.repo.name,
+        }
+
+    def test_a_todo_older_than_seven_days_leaves_the_working_list(self):
+        self.write_events([self._old_todo("sam-1", 9), self._old_todo("sam-2", 2)])
+
+        working = self.run_queue("sam", "ls")
+        self.assertIn("sam-2", working.stdout)
+        self.assertNotIn("sam-1", working.stdout, "a 9-day-old todo is backlog")
+
+        shelved = self.run_queue("sam", "backlog")
+        self.assertIn("sam-1", shelved.stdout)
+        self.assertNotIn("sam-2", shelved.stdout, "backlog is only the shelved ones")
+
+    def test_next_never_hands_back_a_backlog_item(self):
+        self.write_events([self._old_todo("sam-1", 30)])
+
+        result = self.run_queue("sam", "next")
+
+        self.assertNotIn("sam-1  todo → doing", result.stdout)
+        self.assertIn("backlog", result.stdout)
+
+    def test_next_takes_the_newest_item_not_the_oldest(self):
+        """
+        2026-10-17: "assume the most recently added things are the things i
+        care about the most."
+        """
+        self.write_events([self._old_todo("sam-1", 3), self._old_todo("sam-2", 1)])
+
+        result = self.run_queue("sam", "next")
+
+        self.assertIn("sam-2", result.stdout)
+        self.assertNotIn("sam-1", result.stdout)
 
     def test_done_still_refuses_unmet_clauses_for_assigned_agent(self):
         item_id = self.add_item()
