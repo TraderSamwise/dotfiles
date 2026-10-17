@@ -22,12 +22,14 @@
 
 set -euo pipefail
 
-PORT=9222
+# CHROME_MCP_PORT targets another CDP endpoint (e.g. a dev Electron on 9224); default is Canary.
+PORT="${CHROME_MCP_PORT:-9222}"
 LOG=/tmp/chrome-mcp.log
+[ "$PORT" = 9222 ] || LOG="/tmp/chrome-mcp-${PORT}.log"
 POLL_MAX_SECONDS=60
 POLL_INTERVAL=2
 
-if ! curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/json/version" >/dev/null 2>&1; then
+if [ "$PORT" = 9222 ] && ! curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/json/version" >/dev/null 2>&1; then
   "$HOME/.local/bin/canary" >/tmp/chrome-mcp-canary.log 2>&1 || true
 fi
 
@@ -43,7 +45,7 @@ while [ $elapsed -lt $POLL_MAX_SECONDS ]; do
 done
 
 if [ -z "$WS" ]; then
-  echo "chrome-devtools-mcp wrapper: Chrome did not appear on 127.0.0.1:${PORT} within ${POLL_MAX_SECONDS}s" >&2
+  echo "chrome-devtools-mcp wrapper: no CDP browser appeared on 127.0.0.1:${PORT} within ${POLL_MAX_SECONDS}s" >&2
   echo "  Launch it via the 'canary' script and the supergateway will retry." >&2
   exit 1
 fi
