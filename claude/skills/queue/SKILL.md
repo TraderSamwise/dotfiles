@@ -126,6 +126,32 @@ There is no `wontdo` proposal and no `dropped` ruling any more. If it should not
 be done, remove it and say so in your reply. The log is append-only, so a delete
 is a tombstone — `queue show` can still account for the id, every view drops it.
 
+## Check an item is real before you work it
+
+An item in the queue is not automatically an ask from Sam. Agents write items
+too — splitting a clause off a bigger one, recording something they found — and
+those read exactly like his words, especially when they quote him.
+
+Before starting anything you did not just take from him:
+
+```bash
+queue show 947602-126      # who added it, and its whole history
+```
+
+- **If an agent added it, the premise is a claim, not an instruction.** Check it
+  still holds. If it quotes Sam from another item, read that item too — its
+  state and its notes.
+- **A `doing` item inherited from a previous session is the most suspect thing
+  in the queue.** Nobody's hands are on it, somebody left it mid-flight, and the
+  reason may already be gone.
+- **If it is already done, close it** and say so. If it should not be done,
+  `queue delete` it and say so.
+
+On 2026-10-17 an agent inherited a `doing` item, spent a day on it across three
+merged PRs, and the work had shipped three weeks earlier under a different item
+that was already `done`. The design had been settled and written down in a note
+on the parent item. One `queue show` on the parent would have ended it.
+
 ## Order: newest first
 
 **`queue next` takes the NEWEST unclaimed item**, not the oldest. 2026-10-17:

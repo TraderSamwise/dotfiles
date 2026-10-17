@@ -48,34 +48,35 @@ queue add "queue up: the live pill is not vertically centred, this is all over t
 One `queue add` per ask; five things listed is five items.
 
 **todo, doing, done. That is it.** `todo` → `doing` (`--by`) → `done`
-(`--commit` AND `--proof`). Skipping a state is refused.
+(nothing). `todo` → `done` directly is fine.
 
 **This is not a ticket system.** Queueing is to get shit done. I will requeue
 additional fixes if I need them.
 
+- **`done` the second it is done.** Committed or merged IS the gate: no "test it
+  and I'll mark it", no confirmation from me. `queue done <id>` takes no
+  arguments and runs when the commit lands, not after CI or a deploy.
+  `--commit` and `--proof` are still accepted and recorded; they are not
+  conditions, and you never hold an item open to assemble them.
 - **`doing` means hands are on it** — actively writing it, debug logging out in
-  the wild, or something that genuinely cannot be settled yet. It is not a
-  holding pen. **Never park an item there waiting for a deploy.**
-- **`done` is done.** Do not hold work open waiting for my blessing and do not
-  end a report with a list of things awaiting it. I will say if there is a
-  follow-up, and that is a new item or a `queue requeue`, not a state you kept
-  warm.
-- **`--proof` is something you RAN and what it answered.** Take whatever
-  actually settles the question, and do not wait on a deploy to get it. For most
-  code that is a gate you PROVE-FAILED — broke the assertion, watched it fail,
-  restored it, watched it pass — which is a stronger claim than a deploy because
-  it also says what would catch the regression. Go to the running product only
-  when nothing else can settle it: something rendered, something
-  deploy-dependent, a database row. A commit sha is never proof on its own,
-  because a claim made from a sha alone is why this tool exists.
-- **`blocked`, `wontdo` and `dropped` are exits, not steps.** Waiting on me,
-  you proposing to abandon something, and my ruling.
-- **`dropped` is mine alone.** Abandoning something I asked for is my call, and
-  a tool that lets an agent do it is a tool that lets an inconvenient request
-  disappear. If you think something should not be done, propose it with
-  `queue wontdo <id> --why "..."` and SAY SO — that keeps it on the list with a
-  `?` until I rule with `queue drop` or `queue requeue`. You take it to the
-  edge, I make the call.
+  the wild. It is not a holding pen. **Never park an item there waiting for a
+  deploy.** Waiting on me is still `todo`; tell me rather than storing it.
+- **Work that will not be done gets deleted.** `queue delete <id>` — `--why` is
+  optional and logged. There is no `wontdo` or `dropped` any more. Remove it and
+  say so in your reply.
+- **Working the queue means newest first.** `queue next` takes the most recent
+  unclaimed item, because that is the one I care about most. Usually I will name
+  the work; newest-first is what "do the queue" means when I do not.
+- **A todo I have not touched for 7 days leaves the working list.** `ls` and
+  `next` skip it, so you cannot pick one up by accident. `queue backlog` is the
+  only way to see them, and it takes the same `--mine`/`--project` filters so we
+  can clear it out together. **Never work a backlog item unless I ask**, and
+  never offer one as "what's next".
+- **Before you work an item you did not just take from me, check it is still
+  real.** An item written by an agent is not an ask from me. `queue show <id>`
+  names who added it; if it quotes me from another item, read that item too. A
+  `doing` item inherited from a previous session is the one most likely to be
+  finished already.
 - Never say something is done in a message without the matching `queue`
   transition behind it.
 
