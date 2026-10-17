@@ -206,9 +206,9 @@ into unrelated code or inventory agents he is not asking about.
 - **Commits** — `git log --since=<window>` on master and on my branch, by my
   author handle, else by my branch.
 - **PRs** — open and merged PRs whose `headRefName` is my branch or one I cut.
-- **Queue** — `queue ls --mine`, newest first, `doing` before `todo`. `queue`
-  has no time filter, so take creation times from the FIRST event per id in
-  `log.jsonl`, never from memory.
+- **Queue** — `queue ls --mine`: open items ONLY (`doing`, then `todo`, newest
+  first), whatever their age. A `done` item never goes in QUEUE — its commit is
+  already in LANDED, and listing it there reads as still outstanding.
 - **Branch state** — current branch, ahead/behind master, uncommitted files,
   unpushed commits.
 - **Open thread** with whoever dispatched me, if any (`aimux thread list`).
@@ -238,8 +238,8 @@ LANDED (<N> in last <window>)
 IN FLIGHT
 - <agent> on <branch>: <one-line status> — <PR if open>
 
-QUEUE (<N> mine in last <window>)
-- <id> <state> <one line>
+QUEUE (<N> open)
+- <id> <doing|todo> <one line>
 next: <id>
 ```
 
