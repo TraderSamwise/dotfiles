@@ -1,6 +1,6 @@
 ---
 name: queue
-description: "Sam's request queue — capture, state and proof. Use ONLY when Sam says 'queue up' (or any misspelling: queue this, queu up, que up, add to the queue), when something is an obvious follow-up to an already-queued item, when he asks what is in his queue / what is left / what is outstanding, or before claiming anything is done. Do NOT queue things he did not ask you to queue."
+description: "Sam's request queue — capture, state and proof. Use ONLY when Sam says 'queue up' (or any misspelling: queue this, queu up, que up, add to the queue), when something is an obvious follow-up to an already-queued item, when he asks what is in his queue / what is left / what is outstanding, when he asks for his own items ('/queue mine', 'what's next for you'), or before claiming anything is done. Do NOT queue things he did not ask you to queue."
 user-invocable: true
 ---
 
@@ -66,16 +66,16 @@ todo ─► doing ─► done
   └───────┴─────► blocked / wontdo ─► dropped
 ```
 
-**Three states, and Sam named them on 2026-09-04:** *"todo, doing, done. thats
+**Three states, and Sam named them on 2026-09-04:** _"todo, doing, done. thats
 it. and doing is when actively coding it or if we have to push debug logs or if
-there is a real need for verification. otherwise done is done."*
+there is a real need for verification. otherwise done is done."_
 
 So `doing` is not a holding pen. It means hands are on it — writing the code,
 debug logging out in the wild, or something that genuinely cannot be settled
 yet. **Never park an item in `doing` to wait for a release.** He also said:
-*"queue tasks should not wait on deployment UNLESS there is uncertainty of the
+_"queue tasks should not wait on deployment UNLESS there is uncertainty of the
 fix to a high degree. queueing is to just get shit done. ill requeue additional
-fixes if needed."* And: *"queue system is not a ticket system."*
+fixes if needed."_ And: _"queue system is not a ticket system."_
 
 `blocked`, `wontdo` and `dropped` are EXITS, not steps in that flow — waiting on
 Sam, proposing to abandon, and his ruling. They are why the diagram has a second
@@ -83,19 +83,19 @@ line.
 
 There were three states after `doing` — `landed` for a commit, `shipped` for
 something a person could reach, `verified` for Sam confirming it. He collapsed
-them on 2026-09-03: *"Shipped and landed are the same thing to me. Once it's
-done it's done, move on. I'll report if there is a follow up."*
+them on 2026-09-03: _"Shipped and landed are the same thing to me. Once it's
+done it's done, move on. I'll report if there is a follow up."_
 
 `wontdo` is a proposal and `dropped` is Sam's ruling — see below. An agent never
 reaches `dropped` on its own.
 
-| state | what it claims | what the tool demands |
-|---|---|---|
-| `todo` | he asked for it | his words |
-| `doing` | hands are on it, or it truly cannot be settled yet | `--by` |
-| `done` | it is written, and something you ran says so | `--commit` **and** `--proof` |
-| `wontdo` | you propose abandoning it | `--why`, and it stays listed |
-| `dropped` | **Sam agreed to abandon it** | Sam only |
+| state     | what it claims                                     | what the tool demands        |
+| --------- | -------------------------------------------------- | ---------------------------- |
+| `todo`    | he asked for it                                    | his words                    |
+| `doing`   | hands are on it, or it truly cannot be settled yet | `--by`                       |
+| `done`    | it is written, and something you ran says so       | `--commit` **and** `--proof` |
+| `wontdo`  | you propose abandoning it                          | `--why`, and it stays listed |
+| `dropped` | **Sam agreed to abandon it**                       | Sam only                     |
 
 ```bash
 queue start q7 --by claude
@@ -167,6 +167,15 @@ queue ls --all            # every repo
 queue ls --state blocked
 queue show q7             # one item, all its history
 ```
+
+### `/queue mine [window]`
+
+This agent's own outstanding items, queued in the last 24h by default (`/queue
+mine 48h`, `/queue mine 3d` override it). Run `queue ls --mine`, then keep the
+items whose FIRST event in `log.jsonl` falls inside the window — `queue` has no
+time filter, so read creation times from the log, never from memory. Report
+oldest first, one line each, `doing` items before `todo`, then name the one to
+pick up next.
 
 ## Where it lives
 
