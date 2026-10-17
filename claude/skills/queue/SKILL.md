@@ -1,6 +1,6 @@
 ---
 name: queue
-description: "Sam's request queue — capture, state and proof. Use ONLY when Sam says 'queue up' (or any misspelling: queue this, queu up, que up, add to the queue), when something is an obvious follow-up to an already-queued item, when he asks what is in his queue / what is left / what is outstanding, when he asks for his own items ('/queue mine', 'what's next for you'), or before claiming anything is done. Do NOT queue things he did not ask you to queue."
+description: "Sam's request queue — capture, state and proof. Use ONLY when Sam says 'queue up' (or any misspelling: queue this, queu up, que up, add to the queue), when something is an obvious follow-up to an already-queued item, when he asks what is in his queue / what is left / what is outstanding, when he asks for this agent's own report ('/queue mine', 'what's next for you', 'what are we working on', 'what shipped', 'what landed', 'what's in flight', 'status'), or before claiming anything is done. Do NOT queue things he did not ask you to queue."
 user-invocable: true
 ---
 
@@ -168,14 +168,67 @@ queue ls --state blocked
 queue show q7             # one item, all its history
 ```
 
-### `/queue mine [window]`
+## `/queue mine [window] [all]` — what landed and what is in flight
 
-This agent's own outstanding items, queued in the last 24h by default (`/queue
-mine 48h`, `/queue mine 3d` override it). Run `queue ls --mine`, then keep the
-items whose FIRST event in `log.jsonl` falls inside the window — `queue` has no
-time filter, so read creation times from the log, never from memory. Report
-oldest first, one line each, `doing` items before `todo`, then name the one to
-pick up next.
+Answer Sam's "what are we on and what shipped" in one tight report. Do not drift
+into unrelated code or inventory agents he is not asking about.
+
+**Args**, any order; if ambiguous, pick the most specific reading and proceed:
+
+1. **Window** — `30m`, `2h`, `1d`, or `last 6 hours`, `since yesterday`, `today`.
+   Default **24h**.
+2. **Scope** — `all` / `everything` / `project-wide` / `fleet` means every agent
+   and every master commit. Default **self**: this agent's own work.
+
+**Self** is this agent's work in the window:
+
+- **Commits** — `git log --since=<window>` on master and on my branch, by my
+  author handle, else by my branch.
+- **PRs** — open and merged PRs whose `headRefName` is my branch or one I cut.
+- **Queue** — `queue ls --mine`, oldest first, `doing` before `todo`. `queue`
+  has no time filter, so take creation times from the FIRST event per id in
+  `log.jsonl`, never from memory.
+- **Branch state** — current branch, ahead/behind master, uncommitted files,
+  unpushed commits.
+- **Open thread** with whoever dispatched me, if any (`aimux thread list`).
+
+**If I am an overseer** — this session has `aimux message send --from <me>` to
+several agents — self also covers the agents I dispatched: their branches, PRs
+and in-flight work in the window. Otherwise it is just my own branch and queue.
+
+**Collect**, in parallel, keeping calls tight:
+
+- `git fetch` first, then `git log --since=<window> --pretty=format:'%h %ai %s' origin/master`.
+- `gh pr list --state merged --search "merged:>=<ISO>" --json number,title,mergeCommit,author --limit 50`.
+- `gh pr list --state open --json number,title,headRefName,author,updatedAt --limit 50`.
+- `aimux list --json` — status of each agent, and which entry is me.
+- The repo's deployed-version check, if its docs name one; with `all`, also
+  how far the release lane is behind master (`git rev-list --count`).
+
+With `all`: every master commit grouped by author, every open PR with its owner
+inferred from branch or author, every active agent.
+
+**Report** — these sections, one line per item, `none` for an empty one:
+
+```
+LANDED (<N> in last <window>)
+- PR #<n> <title> — <merge sha> — <owner if known>
+
+IN FLIGHT
+- <agent> on <branch>: <one-line status> — <PR if open>
+
+QUEUE (<N> mine in last <window>)
+- <id> <state> <one line>
+next: <id>
+```
+
+With `all`, add `MASTER COMMITS (not in the merged-PR list)`. End with one line
+on the deployed lane vs master, when the repo has one. Under ~20 lines unless
+`all` over a long window.
+
+**Leave out** agent chatter and "quiet, nothing new" lines, idle agents,
+history of how the work got here, blockers unless one exists right now, and any
+deploy detail beyond that one line (that is `/triage`).
 
 ## Where it lives
 
