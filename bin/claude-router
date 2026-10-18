@@ -56,12 +56,26 @@ def health():
 PROMPT_FLAGS = ("-p", "--print", "--prompt")
 
 
-def prompt_boundary(args: list[str]) -> int:
-    """Where flags stop and the user's text begins."""
+def flag_positions(args: list[str]) -> list[int]:
+    """
+    Indices that are flags rather than text.
+
+    Stopping at the first prompt flag was wrong in the other direction:
+    `claude -p "x" --output-format json` is documented usage, so flags do
+    follow `-p`. Only the prompt flag's own VALUE is text, and only `--` ends
+    the flag region. `volta/claude` mirrors this; the two must agree.
+    """
+    positions = []
+    skip = False
     for index, arg in enumerate(args):
-        if arg == "--" or arg in PROMPT_FLAGS:
-            return index
-    return len(args)
+        if arg == "--":
+            break
+        if skip:
+            skip = False
+            continue
+        positions.append(index)
+        skip = arg in PROMPT_FLAGS
+    return positions
 
 
 def gpt_flag_index(args: list[str]) -> int | None:
@@ -73,8 +87,7 @@ def gpt_flag_index(args: list[str]) -> int | None:
     prompt flag, text is text. Scanning stops there in the shim too, and the
     two must agree.
     """
-    head = args[:prompt_boundary(args)]
-    return head.index("--gpt") if "--gpt" in head else None
+    return next((index for index in flag_positions(args) if args[index] == "--gpt"), None)
 
 
 def write_private_settings(settings: dict) -> str:
@@ -90,13 +103,36 @@ def write_private_settings(settings: dict) -> str:
     """
     directory = STATE / "gpt"
     directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, 0o700)
-    path = directory / "settings.json"
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if not directory.is_symlink():
+        os.chmod(directory, 0o700)
+    sweep_stale_settings(directory)
+    path = directory / f"settings-{os.getpid()}.json"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
     with os.fdopen(descriptor, "w") as handle:
+        # O_TRUNC leaves an existing file's mode alone, so a 0644 left by an
+        # earlier version would keep it.
         os.fchmod(handle.fileno(), 0o600)
         json.dump(settings, handle, separators=(",", ":"))
     return str(path)
+
+
+def sweep_stale_settings(directory: Path, keep_seconds: int = 86400) -> None:
+    """
+    Ten agents share this machine, so the path carries the pid.
+
+    One shared path was worse than the leak it replaced: three concurrent
+    launches all read the last writer's token, and a reader racing two writers
+    saw empty or truncated JSON most of the time. Per-process files cannot
+    collide, so they are swept by age instead.
+    """
+    cutoff = time.time() - keep_seconds
+    for stale in directory.glob("settings-*.json"):
+        try:
+            if stale.stat().st_mtime < cutoff:
+                stale.unlink()
+        except OSError:
+            continue
 
 
 def prepare_gpt(args):
@@ -106,8 +142,11 @@ def prepare_gpt(args):
     if flag is not None:
         del options[flag]
     tail = args[end:]
-    settings_index = next((i for i, arg in enumerate(options[:prompt_boundary(options)])
-                           if arg == "--settings" or arg.startswith("--settings=")), None)
+    settings_index = next(
+        (i for i in flag_positions(options)
+         if options[i] == "--settings" or options[i].startswith("--settings=")),
+        None,
+    )
     settings = {}
     if settings_index is not None:
         arg = options[settings_index]

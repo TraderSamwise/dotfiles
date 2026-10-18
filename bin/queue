@@ -439,8 +439,15 @@ def parse_at(value: object) -> datetime | None:
 
 
 def added_at(item: dict) -> datetime | None:
-    """When the ask was first captured, from the log rather than from memory."""
-    return parse_at(item.get("added"))
+    """
+    When the ask was first captured, from the log rather than from memory.
+
+    A future stamp is no more trustworthy here than in `touched_at`: an `add`
+    dated a year ahead kept its item on the working list and at the head of
+    `next`.
+    """
+    when = parse_at(item.get("added"))
+    return when if when and when <= datetime.now(timezone.utc) else None
 
 
 def touched_at(item: dict) -> datetime | None:

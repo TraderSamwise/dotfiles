@@ -68,10 +68,33 @@ class SyncInstructionsTest(unittest.TestCase):
         captured = self.target.read_bytes()
         failed = self.run_sync()
         self.assertNotEqual(failed.returncode, 0, "a captured key must fail the sync")
-        self.assertIn("instead of the document root", failed.stderr)
+        self.assertIn("would adopt root keys", failed.stderr)
         self.assertEqual(self.target.read_bytes(), captured, "a refusal must not write")
         checked = self.run_sync("--check")
         self.assertNotEqual(checked.returncode, 0, "--check must not report a match")
+
+    def test_a_table_inside_the_managed_markers_is_refused(self):
+        """
+        Preserved runtime settings are re-emitted AFTER the block, so a table
+        among them adopts every root key that follows. `assert_top_level` only
+        looks above the block, so it could not see a table the sync itself
+        moved down -- the same destruction the automatic relocation caused.
+        """
+        self.assertEqual(self.run_sync().returncode, 0)
+        synced = self.target.read_text()
+        marker = synced.index("# END managed:")
+        poisoned = (
+            synced[:marker]
+            + '[projects."/w"]\ntrust_level = "trusted"\n\n'
+            + synced[marker:]
+        )
+        self.target.write_text(poisoned)
+        before = self.target.read_bytes()
+        failed = self.run_sync()
+        self.assertNotEqual(failed.returncode, 0, "a table inside the markers must fail")
+        self.assertIn("[table] header", failed.stderr)
+        self.assertEqual(self.target.read_bytes(), before, "a refusal must not write")
+        self.assertNotEqual(self.run_sync("--check").returncode, 0)
 
     def test_root_keys_below_the_block_survive_an_ordinary_sync(self):
         """Two repair attempts swallowed these into a prepended mcp server."""

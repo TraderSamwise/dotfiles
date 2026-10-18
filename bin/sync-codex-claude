@@ -88,6 +88,19 @@ def replace_managed_block(config: str, block: str) -> str:
         if len(assignments) != 1 or instruction is None:
             raise ValueError("Managed instructions must contain one multiline instruction assignment.")
         remainder = body[:instruction.start()] + body[instruction.end():]
+        # The remainder is re-emitted AFTER the managed block, so a table
+        # header among the preserved runtime settings would adopt every root
+        # key that follows it. `assert_top_level` only looks above the block,
+        # so it cannot see a table the sync itself moved down.
+        table = TABLE_HEADER_RE.search(remainder)
+        if table:
+            line = remainder[: table.start()].count("\n") + 1
+            raise ValueError(
+                "Managed instruction markers contain a [table] header "
+                f"(line {line} of the preserved settings). It would adopt the "
+                "root keys below the block. Move it out of the managed markers "
+                "by hand."
+            )
     outside = STALE_BLOCK_RE.sub(lambda _: remainder, config)
     if re.search(r"^developer_instructions\s*=", outside, re.M):
         raise ValueError("Codex config has unmanaged developer_instructions; refusing to overwrite them.")
@@ -119,10 +132,11 @@ def assert_top_level(config: str) -> str:
     if header:
         line = config[: header.start()].count("\n") + 1
         raise ValueError(
-            "Codex developer_instructions would belong to the table opened at "
-            f"line {line} instead of the document root. Move the managed block "
-            "above every [table] header in the config by hand; relocating it "
-            "here cannot tell your root keys from that table's members."
+            f"A [table] at line {line} would adopt root keys that must stay at "
+            "the document root, so Codex would read the wrong settings or no "
+            "instructions at all. Move every [table] header below the last "
+            "root-level assignment by hand; doing it here cannot tell your root "
+            "keys from that table's members."
         )
     return config
 

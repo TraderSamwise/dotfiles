@@ -137,24 +137,71 @@ class ClaudeRouterTests(unittest.TestCase):
                                     env={"HOME": directory}, capture_output=True, text=True)
             self.assertEqual(result.stdout, "native", "the shim must not route on prompt text")
 
-    def test_settings_land_in_one_private_file_not_a_temp_directory(self):
+    def test_settings_are_private_per_process_and_swept_by_age(self):
         """
-        The first fix wrote a fresh `delete=False` temp file per launch and then
-        `execve`d away, so 128 of them piled up in `$TMPDIR` holding tokens.
+        Three fixes deep. Inlining put tokens in argv; a `delete=False` temp
+        file per launch left 128 of them in `$TMPDIR`; ONE shared path handed
+        three concurrent launches the last writer's token. The path carries the
+        pid and old ones are swept.
         """
         import stat
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(router, "STATE", Path(directory) / "state"):
-                first = router.write_private_settings({"env": {"TOKEN": "one"}})
-                second = router.write_private_settings({"env": {"TOKEN": "two"}})
-            self.assertEqual(first, second, "each launch must reuse one path")
-            self.assertEqual(json.load(open(second))["env"]["TOKEN"], "two")
-            self.assertEqual(stat.S_IMODE(os.stat(second).st_mode), 0o600)
-            self.assertEqual(stat.S_IMODE(os.stat(Path(second).parent).st_mode), 0o700)
-            self.assertTrue(
-                second.startswith(str(Path(directory) / "state")),
-                f"settings must live under STATE, not {second}",
-            )
+            state = Path(directory) / "state"
+            with patch.object(router, "STATE", state):
+                mine = router.write_private_settings({"env": {"TOKEN": "mine"}})
+                self.assertIn(str(os.getpid()), mine, "the path must carry the pid")
+                self.assertEqual(json.load(open(mine))["env"]["TOKEN"], "mine")
+                self.assertEqual(stat.S_IMODE(os.stat(mine).st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(os.stat(Path(mine).parent).st_mode), 0o700)
+                self.assertTrue(mine.startswith(str(state)), f"not under STATE: {mine}")
+
+                # Another agent's concurrent launch must not touch mine.
+                other = Path(mine).parent / "settings-999999.json"
+                other.write_text('{"env":{"TOKEN":"theirs"}}')
+                router.write_private_settings({"env": {"TOKEN": "mine again"}})
+                self.assertEqual(json.load(open(other))["env"]["TOKEN"], "theirs")
+                self.assertEqual(json.load(open(mine))["env"]["TOKEN"], "mine again")
+
+                # A 0644 file left by an earlier version is tightened, not inherited.
+                os.chmod(mine, 0o644)
+                router.write_private_settings({"env": {"TOKEN": "tightened"}})
+                self.assertEqual(stat.S_IMODE(os.stat(mine).st_mode), 0o600)
+
+                stale = Path(mine).parent / "settings-123456.json"
+                stale.write_text("{}")
+                os.utime(stale, (0, 0))
+                router.write_private_settings({"env": {"TOKEN": "sweeps"}})
+                self.assertFalse(stale.exists(), "a day-old file must be swept")
+                self.assertTrue(other.exists(), "a fresh one must survive")
+
+    def test_flags_after_a_prompt_still_route_but_the_prompt_itself_never_does(self):
+        """
+        `claude -p "x" --output-format json` is documented usage, so stopping at
+        the first prompt flag silently refused to route. Only the prompt's own
+        value is text.
+        """
+        self.assertEqual(router.gpt_flag_index(["-p", "hi", "--gpt"]), 2)
+        self.assertEqual(router.gpt_flag_index(["--print", "hi", "--gpt"]), 2)
+        self.assertIsNone(router.gpt_flag_index(["-p", "--gpt"]))
+        self.assertIsNone(router.gpt_flag_index(["--", "--gpt"]))
+        args = router.prepare_gpt(["--gpt", "-p", "hi", "--settings", "{\"env\":{\"MINE\":\"y\"}}"])
+        self.assertEqual(args.count("--settings"), 1, "the user's own --settings must be merged")
+        merged = self.settings_payload(args)
+        self.assertEqual(merged["env"]["MINE"], "y")
+        for key, value in router.GPT_ENV.items():
+            self.assertEqual(merged["env"][key], value, "GPT_ENV must survive the merge")
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / ".local/bin/claude-router"
+            helper.parent.mkdir(parents=True)
+            helper.write_text('print("ROUTED")\n')
+            native = Path(directory) / ".volta/bin/claude"
+            native.parent.mkdir(parents=True)
+            native.write_text('#!/bin/sh\nprintf "NATIVE"\n')
+            native.chmod(0o755)
+            for argv, expected in ((["-p", "hi", "--gpt"], "ROUTED"), (["-p", "--gpt"], "NATIVE")):
+                result = subprocess.run([str(ROOT / "volta/claude"), *argv],
+                                        env={"HOME": directory}, capture_output=True, text=True)
+                self.assertEqual(result.stdout.strip(), expected, f"{argv} -> {result.stdout!r}")
 
     def status_exit(self, *, version, loaded_job, problem):
         """`status` returning 1 unconditionally passed every earlier test."""

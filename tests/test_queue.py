@@ -233,6 +233,22 @@ class QueueCase(unittest.TestCase):
         self.assertNotIn("sam-1", self.run_queue("sam", "ls").stdout)
         self.assertIn("sam-1", self.run_queue("sam", "backlog").stdout)
 
+    def test_a_future_add_does_not_pin_an_item_or_head_the_queue(self):
+        """`touched_at` filtered future stamps; `added_at` did not."""
+        from datetime import timedelta
+
+        ahead = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(timespec="seconds")
+        self.write_events([
+            {"id": "sam-5", "workId": "sam-5", "kind": "add", "at": ahead,
+             "ask": "dated a year ahead", "by": "sam", "tree": self.repo.name},
+            self._old_todo("sam-6", 1),
+        ])
+
+        working = self.run_queue("sam", "ls").stdout
+        self.assertNotIn("sam-5", working, "a future add must not sit on the list")
+        self.assertIn("sam-6", working)
+        self.assertIn("sam-6", self.run_queue("sam", "next").stdout)
+
     def test_a_wontdo_proposal_does_not_undo_a_drop_sam_already_made(self):
         """`wontdo` maps to todo, so it counted as a revival of a real drop."""
         added = self._old_todo("sam-8", 2)

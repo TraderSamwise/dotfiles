@@ -1,10 +1,14 @@
 #!/bin/sh
-# `--gpt` is a flag only before the prompt begins: matching it anywhere routed
-# `claude -p "--gpt"` into GPT and lost the prompt. Mirrors PROMPT_FLAGS and
-# gpt_flag_index in bin/claude-router; the two must agree.
+# A prompt flag's VALUE is text, so `-p "--gpt"` must not route; everything
+# else before `--` is a flag, because `claude -p "x" --output-format json` is
+# documented usage. Mirrors PROMPT_FLAGS and flag_positions in
+# bin/claude-router; the two must agree.
+skip=0
 for arg do
+  if [ "$skip" = 1 ]; then skip=0; continue; fi
   case "$arg" in
-    -- | -p | --print | --prompt) break ;;
+    --) break ;;
+    -p | --print | --prompt) skip=1 ;;
     --gpt) exec /usr/bin/python3 "$HOME/.local/bin/claude-router" gpt "$@" ;;
   esac
 done
