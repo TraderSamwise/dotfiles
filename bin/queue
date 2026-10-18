@@ -327,10 +327,38 @@ def item_matches_token(item: dict, token: str) -> bool:
     return token in (item.get("id"), item.get("workId"))
 
 
+def revived_after(events: list[dict]) -> set[int]:
+    """
+    Indices of retired-as-deleted events that a later event undoes.
+
+    A `dropped` ruling is a tombstone, but Sam reopened some of them before the
+    state was retired -- `947602-83` reads `dropped, todo, ..., done`. Honouring
+    the tombstone blindly erased it and seven others, history and all. A note
+    after a drop is not a revival; an `add` or a real state transition is.
+    """
+    last_revival: dict[str, int] = {}
+    for index, e in enumerate(events):
+        work_id = event_work_id(e)
+        if not work_id:
+            continue
+        state = RETIRED.get(e.get("state"), e.get("state"))
+        if e.get("kind") == "add" or state in STATES:
+            last_revival[work_id] = index
+    honoured = set()
+    for index, e in enumerate(events):
+        if e.get("state") not in RETIRED_AS_DELETED:
+            continue
+        work_id = event_work_id(e)
+        if work_id and last_revival.get(work_id, -1) < index:
+            honoured.add(index)
+    return honoured
+
+
 def fold(events: list[dict]) -> dict[str, dict]:
     """The current state of every item, replayed from the log."""
     items: dict[str, dict] = {}
-    for e in events:
+    tombstones = revived_after(events)
+    for index, e in enumerate(events):
         eid = e.get("id")
         work_id = event_work_id(e)
         if not eid or not work_id:
@@ -363,7 +391,7 @@ def fold(events: list[dict]) -> dict[str, dict]:
         if e.get("kind") == "hand":
             item["owner"] = e.get("to")
             continue
-        if e.get("state") in RETIRED_AS_DELETED:
+        if index in tombstones:
             items.pop(work_id, None)
             continue
         state = RETIRED.get(e.get("state"), e.get("state"))
@@ -402,12 +430,31 @@ def next_id(events: list[dict], who: str) -> str:
     return f"{stem}-{(mine[-1] + 1) if mine else 1}"
 
 
+def parse_at(value: object) -> datetime | None:
+    """One naive or malformed timestamp must not take down every list view."""
+    try:
+        when = datetime.fromisoformat(value or "")  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
 def added_at(item: dict) -> datetime | None:
     """When the ask was first captured, from the log rather than from memory."""
-    try:
-        return datetime.fromisoformat(item.get("added") or "")
-    except ValueError:
-        return None
+    return parse_at(item.get("added"))
+
+
+def touched_at(item: dict) -> datetime | None:
+    """
+    The last time anything happened to the item.
+
+    Sam's rule is a todo he has NOT TOUCHED for seven days, so an item he
+    reopens today belongs back on the working list however old its first
+    capture is. Keying the backlog on the capture time hid it instantly.
+    """
+    stamps = [parse_at(e.get("at")) for e in item.get("history", [])]
+    seen = [when for when in stamps if when]
+    return max(seen) if seen else added_at(item)
 
 
 def is_backlog(item: dict) -> bool:
@@ -421,10 +468,20 @@ def is_backlog(item: dict) -> bool:
     """
     if item.get("state") != "todo":
         return False
-    at = added_at(item)
+    at = touched_at(item)
     if at is None:
-        return False
+        return True
     return (datetime.now(timezone.utc) - at).days >= BACKLOG_AFTER_DAYS
+
+
+def newest_first(item: dict) -> tuple[datetime, tuple[int, str]]:
+    """
+    2026-10-17: "assume the most recently added things are the things i care
+    about the most." Sorting by the id's number instead ranked a four-day-old
+    `aaaaaa-83` above a `zzzzzz-1` added today, because the counter is per
+    agent and says nothing about time across agents.
+    """
+    return (added_at(item) or datetime.min.replace(tzinfo=timezone.utc), id_order(item["id"]))
 
 
 def id_order(eid: str) -> tuple[int, str]:
@@ -698,7 +755,7 @@ def cmd_ls(args) -> None:
             print(f"\n{key}")
         order = {s: n for n, s in enumerate(STATES)}
         for item in sorted(
-            rows, key=lambda i: (order.get(i["state"], 9), id_order(i["id"])), reverse=True
+            rows, key=lambda i: (order.get(i["state"], 9), newest_first(i)), reverse=True
         ):
             shown += 1
             where = item.get("tree")
@@ -805,7 +862,7 @@ def cmd_next(args) -> None:
     if not free:
         print(f"Nothing queued for {me} in {worktree()}.")
         shelved = 0
-        for item in sorted(items.values(), key=lambda i: id_order(i["id"]), reverse=True):
+        for item in sorted(items.values(), key=newest_first, reverse=True):
             if item["state"] != "todo":
                 continue
             if is_backlog(item):
@@ -817,7 +874,7 @@ def cmd_next(args) -> None:
         if shelved:
             print(f"  {shelved} in the backlog. `queue backlog` to look, when Sam asks.")
         return
-    item = sorted(free, key=lambda i: id_order(i["id"]), reverse=True)[0]
+    item = sorted(free, key=newest_first, reverse=True)[0]
     append(
         log,
         {
@@ -923,7 +980,7 @@ def rebuild(key: str) -> None:
             continue
         lines.append(f"## {state} ({len(rows)})")
         lines.append("")
-        for item in sorted(rows, key=lambda i: id_order(i["id"])):
+        for item in sorted(rows, key=newest_first):
             lines.append(f"- **{item['id']}** — {item['ask']}")
             if item.get("workId") and item["workId"] != item["id"]:
                 lines.append(f"  - `workId`: {item['workId']}")

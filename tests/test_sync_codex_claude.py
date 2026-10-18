@@ -47,6 +47,23 @@ class SyncInstructionsTest(unittest.TestCase):
         self.assertNotEqual(self.run_sync("--check").returncode, 0)
         self.assertEqual(self.target.read_bytes(), synced)
 
+    def test_a_table_prepended_above_the_block_does_not_capture_the_key(self):
+        """
+        A `[table]` header above the managed block makes
+        `developer_instructions` a member of that table, so Codex reads no
+        instructions -- and keeping the old position was sticky, so every later
+        sync rewrote it in place and `--check` reported a match.
+        """
+        self.assertEqual(self.run_sync().returncode, 0)
+        self.target.write_text('[mcp_servers.bar]\ncommand = "y"\n' + self.target.read_text())
+        self.assertEqual(self.run_sync().returncode, 0, "a mispositioned block must be repaired")
+        config = self.target.read_text()
+        head = config[: config.index("# BEGIN managed:")]
+        self.assertNotRegex(head, r"(?m)^\[", f"a table header still precedes the block:\n{head}")
+        self.assertIn('[mcp_servers.bar]', config, "the prepended server must survive")
+        self.assertEqual(config.count("developer_instructions ="), 1)
+        self.assertEqual(self.run_sync("--check").returncode, 0)
+
     def test_sync_preserves_config_order_and_runtime_boundaries(self):
         self.assertEqual(self.run_sync().returncode, 0)
         config = self.target.read_text()

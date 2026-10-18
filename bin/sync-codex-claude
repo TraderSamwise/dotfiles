@@ -62,6 +62,9 @@ def source_for_codex() -> tuple[str, list[Path]]:
     return f"{HEADER}\n\n{GENERATED_REMINDER}\n\n" + "\n\n".join(bodies) + "\n", present
 
 
+TABLE_HEADER_RE = re.compile(r"^\[", re.M)
+
+
 def replace_managed_block(config: str, block: str) -> str:
     begins = re.findall(
         r"^# BEGIN managed: .+?/CLAUDE\.md -> Codex developer_instructions$", config, re.M
@@ -91,9 +94,34 @@ def replace_managed_block(config: str, block: str) -> str:
     if matches:
         before = config[:managed.start()]
         after = remainder + config[managed.end():]
+        # A `[table]` header above the block would make the key a member of
+        # that table, so Codex reads no instructions at all. Keeping the old
+        # position was sticky: once a server was prepended, every later sync
+        # rewrote it in place and `--check` reported a match.
+        if TABLE_HEADER_RE.search(before):
+            return assert_top_level(block + "\n\n" + (before.strip() + "\n\n" + after.lstrip()).lstrip())
         prefix = before.rstrip()
-        return (prefix + "\n\n" if prefix else "") + block + "\n\n" + after.lstrip()
-    return block + "\n\n" + config.lstrip()
+        return assert_top_level((prefix + "\n\n" if prefix else "") + block + "\n\n" + after.lstrip())
+    return assert_top_level(block + "\n\n" + config.lstrip())
+
+
+def assert_top_level(config: str) -> str:
+    """
+    `developer_instructions` must be a top-level key, not a table member.
+
+    Comparing text alone let the gate pass while Codex saw nothing, so the
+    placement is checked rather than assumed.
+    """
+    position = config.find(START)
+    if position < 0:
+        raise ValueError("Generated Codex config lost its managed instruction markers.")
+    header = TABLE_HEADER_RE.search(config[:position])
+    if header:
+        raise ValueError(
+            "Codex developer_instructions would belong to "
+            f"{header.group(0).strip()} instead of the document root."
+        )
+    return config
 
 
 def main() -> None:

@@ -77,6 +77,48 @@ class ClaudeRouterTests(unittest.TestCase):
             router.start()
             control.assert_called_once_with("enable", "--now", router.UNIT_NAME)
 
+    def test_start_refuses_a_port_someone_else_already_owns(self):
+        """The inverse of the port check: an occupied port must stop the start."""
+        with patch.object(router, "LINUX", True), patch.object(router, "UNIT") as unit, \
+                patch.object(router, "loaded", return_value=False), patch.object(router, "socket") as sockets, \
+                patch.object(router, "systemctl") as control, patch.object(router, "wait_healthy"):
+            unit.is_file.return_value = True
+            sockets.socket.return_value.__enter__.return_value.connect_ex.return_value = 0
+            with self.assertRaises(RuntimeError) as refusal:
+                router.start()
+            self.assertIn(str(router.PORT), str(refusal.exception))
+            control.assert_not_called()
+
+    def status_exit(self, *, version, loaded_job, problem):
+        """`status` returning 1 unconditionally passed every earlier test."""
+        state = subprocess.CompletedProcess([], 0, "MainPID=42\nActiveState=active", "")
+        with patch.object(router, "LINUX", True), \
+                patch.object(router.subprocess, "check_output", return_value=version), \
+                patch.object(router, "service_state", return_value=state), \
+                patch.object(router, "job_pid", return_value=42), \
+                patch.object(router, "loaded", return_value=loaded_job), \
+                patch.object(router, "health", return_value=problem):
+            return router.main(["status"])
+
+    def test_status_exit_code_separates_healthy_from_each_failure(self):
+        good = f"claude-codex v{router.CONFIG['proxy_version']}\n"
+        self.assertEqual(
+            self.status_exit(version=good, loaded_job=True, problem=None), 0,
+            "a healthy proxy must exit 0",
+        )
+        self.assertEqual(
+            self.status_exit(version=good, loaded_job=True, problem="proxy down"), 1,
+            "an unhealthy proxy must exit 1",
+        )
+        self.assertEqual(
+            self.status_exit(version=good, loaded_job=False, problem=None), 1,
+            "an unloaded service must exit 1",
+        )
+        self.assertEqual(
+            self.status_exit(version="claude-codex v0.0.0-stale\n", loaded_job=True, problem=None), 1,
+            "a version mismatch must exit 1",
+        )
+
     def test_flag_dispatches_after_aimux_arguments(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / ".local/bin/claude-router"
@@ -116,7 +158,7 @@ class ClaudeRouterTests(unittest.TestCase):
                         "permissions": {"allow": ["Read"]}}
             source.write_text(json.dumps(original))
             args = router.prepare_gpt(["--settings", str(source), "--resume", "session", "--gpt"])
-            merged = json.loads(args[args.index("--settings") + 1])
+            merged = self.settings_payload(args)
             self.assertEqual(merged["hooks"], original["hooks"])
             self.assertEqual(merged["permissions"], original["permissions"])
             self.assertEqual(merged["env"]["AIMUX_SESSION_ID"], "session")
@@ -131,19 +173,32 @@ class ClaudeRouterTests(unittest.TestCase):
         self.assertIn("--model=gpt-6-luna", args)
         self.assertNotIn("--model", args)
         self.assertEqual(args[-2:], ["--", "--gpt"])
-        merged = json.loads(next(arg.split("=", 1)[1] for arg in args if arg.startswith("--settings=")))
+        inline = next(arg for arg in args if arg.startswith("--settings="))
+        merged = self.settings_payload([inline.split("=", 1)[1]], 0)
         self.assertEqual(merged["env"]["CUSTOM"], "kept")
         self.assertEqual(merged["hooks"], {"Stop": []})
+
+    def settings_payload(self, args, index=None):
+        """`--settings` now names a 0600 file; argv must never carry the JSON."""
+        import os
+        import stat
+        position = args.index("--settings") + 1 if index is None else index
+        path = args[position]
+        self.assertFalse(path.lstrip().startswith("{"), f"settings inlined into argv: {path}")
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        self.assertEqual(mode, 0o600, f"settings file is {oct(mode)}, not 0600")
+        with open(path) as handle:
+            return json.load(handle)
 
     def test_default_model_and_first_settings_precedence(self):
         defaults = router.prepare_gpt(["--gpt", "--continue"])
         self.assertEqual(defaults[:2], ["--model", router.GPT_MODEL])
-        self.assertEqual(json.loads(defaults[3])["env"], router.GPT_ENV)
+        self.assertEqual(self.settings_payload(defaults, 3)["env"], router.GPT_ENV)
         self.assertEqual(defaults[-1], "--continue")
         args = router.prepare_gpt(["--gpt", "--settings", '{"env":{"FIRST":"yes"}}',
                                    "--settings", '{"env":{"SECOND":"yes"}}'])
         self.assertEqual(args[:2], ["--model", router.GPT_MODEL])
-        first = json.loads(args[args.index("--settings") + 1])
+        first = self.settings_payload(args)
         self.assertEqual(first["env"]["FIRST"], "yes")
         self.assertNotIn("SECOND", first["env"])
         self.assertEqual(args[-1], '{"env":{"SECOND":"yes"}}')

@@ -8,6 +8,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -53,9 +54,40 @@ def health():
     return None
 
 
+def gpt_flag_index(args: list[str]) -> int | None:
+    """
+    The FIRST bare `--gpt` only.
+
+    Filtering every occurrence ate the prompt in `claude --gpt -p "--gpt"`,
+    leaving `-p` dangling so Claude blocked on stdin. One flag was passed, so
+    one is removed; a later one is the user's text.
+    """
+    return args.index("--gpt") if "--gpt" in args else None
+
+
+def write_private_settings(settings: dict) -> str:
+    """
+    Merged settings go to a 0600 file, never into argv.
+
+    A `--settings` file is already 0600 because it can carry tokens. Inlining
+    its JSON put those tokens in the command line, where every other agent on
+    this machine can read them out of `ps`.
+    """
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", prefix="claude-gpt-settings-", delete=False
+    )
+    with handle:
+        os.fchmod(handle.fileno(), 0o600)
+        json.dump(settings, handle, separators=(",", ":"))
+    return handle.name
+
+
 def prepare_gpt(args):
     end = args.index("--") if "--" in args else len(args)
-    options = [arg for arg in args[:end] if arg != "--gpt"]
+    options = list(args[:end])
+    flag = gpt_flag_index(options)
+    if flag is not None:
+        del options[flag]
     tail = args[end:]
     settings_index = next((i for i, arg in enumerate(options)
                            if arg == "--settings" or arg.startswith("--settings=")), None)
@@ -73,7 +105,7 @@ def prepare_gpt(args):
         if not isinstance(settings, dict) or not isinstance(settings.get("env", {}), dict):
             raise ValueError("--settings and its env field must be JSON objects")
     settings["env"] = {**settings.get("env", {}), **GPT_ENV}
-    merged = json.dumps(settings, separators=(",", ":"))
+    merged = write_private_settings(settings)
     if settings_index is None:
         options[0:0] = ["--settings", merged]
     elif options[settings_index] == "--settings":

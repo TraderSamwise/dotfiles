@@ -1,6 +1,11 @@
 import os
 import json
 import subprocess
+from datetime import datetime, timezone
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 import tempfile
 import unittest
 from pathlib import Path
@@ -214,8 +219,68 @@ class QueueCase(unittest.TestCase):
 
         result = self.run_queue("sam", "next")
 
-        self.assertNotIn("sam-1  todo → doing", result.stdout)
-        self.assertIn("backlog", result.stdout)
+        self.assertNotIn("sam-1", result.stdout, "next must not even name a backlog item")
+        self.assertIn("1 in the backlog", result.stdout)
+
+    def test_newest_first_follows_time_not_the_id_counter(self):
+        """
+        The id counter is per agent, so sorting by its number ranked a stale
+        `aaaaaa-83` above a `zzzzzz-1` captured today.
+        """
+        old_high = self._old_todo("aaaaaa-83", 3)
+        new_low = self._old_todo("zzzzzz-1", 0)
+        self.write_events([old_high, new_low])
+
+        listed = self.run_queue("sam", "ls", "--everything").stdout
+        self.assertLess(
+            listed.index("zzzzzz-1"), listed.index("aaaaaa-83"),
+            f"today's item must come first:\n{listed}",
+        )
+        taken = self.run_queue("sam", "next", "--anyone").stdout
+        self.assertIn("zzzzzz-1", taken)
+        self.assertNotIn("aaaaaa-83", taken)
+
+    def test_the_backlog_boundary_sits_exactly_at_seven_days(self):
+        self.write_events([self._old_todo("sam-1", 7), self._old_todo("sam-2", 6)])
+
+        working = self.run_queue("sam", "ls").stdout
+        self.assertIn("sam-2", working, "six days is still the working list")
+        self.assertNotIn("sam-1", working, "seven days has left it")
+
+    def test_an_item_reopened_today_comes_back_however_old_its_capture(self):
+        """
+        Sam's rule is a todo he has NOT TOUCHED for seven days. Keying the
+        backlog on first capture hid an item the moment he reopened it.
+        """
+        added = self._old_todo("sam-1", 30)
+        self.write_events([
+            added,
+            {**added, "kind": "state", "state": "done", "at": added["at"]},
+            {**added, "kind": "state", "state": "todo", "at": now_iso()},
+        ])
+
+        self.assertIn("sam-1", self.run_queue("sam", "ls").stdout)
+        self.assertNotIn("sam-1", self.run_queue("sam", "backlog").stdout)
+
+    def test_a_dropped_item_sam_reopened_survives_with_its_history(self):
+        """
+        `947602-83` reads `dropped, todo, ..., done` in the real log. Honouring
+        the tombstone blindly erased it and seven others, history included.
+        """
+        added = self._old_todo("sam-9", 20)
+        at = added["at"]
+        self.write_events([
+            added,
+            {**added, "kind": "state", "state": "dropped", "at": at, "why": "no"},
+            {**added, "kind": "state", "state": "todo", "at": at},
+            {**added, "kind": "state", "state": "doing", "at": at, "by": "claude"},
+            {**added, "kind": "state", "state": "done", "at": at},
+        ])
+
+        shown = self.run_queue("sam", "show", "sam-9")
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertIn("done", shown.stdout)
+        self.assertIn("sam-9", self.run_queue("sam", "ls", "--everything").stdout)
 
     def test_next_takes_the_newest_item_not_the_oldest(self):
         """

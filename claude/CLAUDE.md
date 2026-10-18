@@ -1,8 +1,9 @@
 # Shared Agent Instructions
 
-Portable policy, shared through public dotfiles. Private identities,
-infrastructure, credentials, and personal knowledge belong in `~/CLAUDE.md`
-or the private documents it references.
+Portable policy, shared through public dotfiles. **This file is public, so it
+must never hold private details: no hosts, IPs, tokens, company repos or
+personal paths.** Private identities, infrastructure, credentials, and personal
+knowledge belong in `~/CLAUDE.md` or the private documents it references.
 
 <!-- codex:sync-start -->
 
@@ -20,7 +21,7 @@ or the private documents it references.
 
 - Capture only when the user says "queue up" (including misspellings), or gives an obvious follow-up to an existing queued item. Capture before replying, verbatim, with one `queue add` per ask; use `queue note <id> "..."` for details on an existing item.
 - Do not queue conversation, current-task steering, answers, plans, subtasks, assignments, or work being handled in this exchange. A complaint or "we should" alone is not a capture trigger.
-- Use the `queue` skill for commands and lifecycle details. States are `todo`, `doing`, and `done`; `doing` means active work, not waiting on the user, CI, or a release. Close queued work when committed or merged. Do not claim a queued item is finished before its `queue done` transition.
+- Use the `queue` skill for commands and lifecycle details. States are `todo`, `doing`, and `done`; `doing` means active work, not waiting on the user, CI, or a release. Close queued work when committed or merged, and delete work that will not be done rather than parking it in a state nobody reads. Do not claim a queued item is finished before its `queue done` transition.
 - Verify inherited items with `queue show` before acting. `queue next` selects newest first; leave the seven-day backlog alone unless asked. When asked what remains, run `queue ls` rather than answering from memory.
 - `queue` alone writes and locates its store. Never create or hand-edit `QUEUE.md` or `log.jsonl`, or redirect the store. Use `~/.local/bin/queue` if absent from PATH; stop and report if that also fails.
 - Items belong to their agent and worktree. Use `queue hand` to transfer ownership; `--anyone` requires an explicit request to work other agents' items. `ls --project` spans a project's worktrees.
@@ -73,7 +74,7 @@ or the private documents it references.
 
 - "One at a time", "one by one", or "next one" means a gated flow: decide branch/worktree need, reproduce, agree on diagnosis/fix, implement, then push/mark complete together. Do not batch without explicit authorization.
 - "Full auto", "plan-execute", "just go", or "batch them" means continue through every phase and commit. Stop early only for an external blocker requiring the user, repeated genuine failure after honest retries, or an instruction to stop/context-switch.
-- Keep progress updates brief and continue work after them. Never stop or truncate work because context is filling; automatic compaction handles it. Do not announce context usage or suggest a fresh session. Preserve plan, decisions, paths, and teammate state across compaction.
+- Mid-run, the most you say is one line naming the phase and the next step, followed immediately by the next tool call; there is no such thing as a good point to report. No status table, no Done/Left, no closing paragraph that asks whether to carry on. Report when the last phase is committed. Never stop or truncate work because context is filling; automatic compaction handles it. Do not announce context usage or suggest a fresh session. Preserve plan, decisions, paths, and teammate state across compaction.
 - "Context switch" means stop the current task immediately and wait for the next instruction.
 - Raise a concern once; after the user decides, proceed without re-arguing it. Use real domain terms consistently in labels and descriptions.
 - Report only actions actually taken and states checked in this turn. Distinguish committed, pushed, merged, built, released, and live. Omit adjacent findings, recaps, promises, and generic disclaimers; report specific failures or limitations that change the user's next action.
@@ -84,7 +85,7 @@ or the private documents it references.
 - Every error, failed optimistic action, and timeout needs a visible outcome with its cause. Never silently abandon work.
 - Temporary diagnostics use minimal direct logging. Do not add flags, globals, localStorage toggles, frameworks, or buffering unless asked.
 - Run tests covering changed files and the fast lane. Full suites belong in CI; run one locally only when explicitly asked. Never raise test/build concurrency on a shared machine.
-- Prefer scoped `vitest run <path>` or `node --test <path>` over root/monorepo test targets. Choose checks that settle the change; do not spend more time waiting on gates than implementing.
+- Prefer scoped `vitest run <path>` or `node --test <path>` over root/monorepo test targets. Choose checks that settle the change: spend at least 5x more time writing code than running tests, and never run a full suite locally unless asked.
 - Report failures and skipped required checks accurately. Do not wait for CI or a deploy to close committed work.
 
 <!-- codex:sync-end -->
