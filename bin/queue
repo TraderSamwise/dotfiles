@@ -102,12 +102,16 @@ RETIRED = {
     # 2026-09-04: "todo, doing, done. thats it."
     "queued": "todo",
     # 2026-10-17: "only 3 states." `blocked` was waiting on Sam, which is just
-    # todo. `wontdo` and `dropped` are gone: something that will not be done is
-    # deleted, not parked in a state nobody reads.
+    # todo. `wontdo` was an agent PROPOSING to abandon something and never Sam's
+    # answer, so it goes back on the list for a real decision.
     "blocked": "todo",
     "wontdo": "todo",
-    "dropped": "todo",
 }
+
+# `dropped` was Sam ruling that something would not be done, and his rule now is
+# that such work is DELETED. Reading it as `todo` resurrected 18 items he had
+# already killed, which surfaced on 2026-10-18. A retired ruling is a tombstone.
+RETIRED_AS_DELETED = ("dropped",)
 
 # What may follow what. `todo -> done` is allowed on purpose: 2026-10-17,
 # "done should be the first thing you do the second you are done." Making an
@@ -358,6 +362,9 @@ def fold(events: list[dict]) -> dict[str, dict]:
             continue
         if e.get("kind") == "hand":
             item["owner"] = e.get("to")
+            continue
+        if e.get("state") in RETIRED_AS_DELETED:
+            items.pop(work_id, None)
             continue
         state = RETIRED.get(e.get("state"), e.get("state"))
         if state in STATES:

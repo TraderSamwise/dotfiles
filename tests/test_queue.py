@@ -150,6 +150,54 @@ class QueueCase(unittest.TestCase):
             "tree": self.repo.name,
         }
 
+    def test_a_dropped_ruling_stays_dropped_and_never_returns_as_todo(self):
+        """
+        `dropped` was Sam answering that work would not be done. His rule now is
+        that such work is deleted, so reading the old state as `todo` brought 18
+        already-killed items back onto the list. A ruling is a tombstone.
+        """
+        added = self._old_todo("sam-1", 1)
+        self.write_events(
+            [
+                added,
+                {
+                    "id": "sam-1",
+                    "workId": "sam-1",
+                    "kind": "state",
+                    "state": "dropped",
+                    "at": added["at"],
+                    "why": "sam said drop it",
+                    "by": "sam",
+                    "tree": self.repo.name,
+                },
+            ]
+        )
+        for view in (["ls"], ["ls", "--everything"], ["backlog"], ["next"]):
+            self.assertNotIn("sam-1", self.run_queue("sam", *view).stdout, view)
+
+    def test_a_wontdo_proposal_returns_to_the_list_for_a_real_decision(self):
+        """
+        `wontdo` was an agent PROPOSING to abandon something, never Sam's
+        answer, so unlike `dropped` it must come back as todo.
+        """
+        added = self._old_todo("sam-2", 1)
+        self.write_events(
+            [
+                added,
+                {
+                    "id": "sam-2",
+                    "workId": "sam-2",
+                    "kind": "state",
+                    "state": "wontdo",
+                    "at": added["at"],
+                    "why": "cannot reproduce",
+                    "by": "claude",
+                    "tree": self.repo.name,
+                },
+            ]
+        )
+        self.assertIn("sam-2", self.run_queue("sam", "ls").stdout)
+
     def test_a_todo_older_than_seven_days_leaves_the_working_list(self):
         self.write_events([self._old_todo("sam-1", 9), self._old_todo("sam-2", 2)])
 
