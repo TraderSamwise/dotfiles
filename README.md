@@ -84,9 +84,18 @@ which bundles its own glyphs: `brew install --cask font-meslo-for-powerlevel10k`
 | `bin/sync-codex-claude` | `~/.local/bin/sync-codex-claude` | Builds Codex `developer_instructions` from the `codex:sync` regions of `~/.claude/CLAUDE.md` then `~/CLAUDE.md` |
 | `bin/claude-router` | `~/.local/bin/claude-router` | Opt-in `claude --gpt` settings and local proxy LaunchAgent controls |
 
-After editing either `CLAUDE.md`, run `sync-codex-claude`. `settings.json` is not
-linked because Claude Code writes to it; copy changes into `claude/settings.json`
-by hand when they are worth sharing.
+Portable policy lives in the shared file; private service context and the memory
+index live in the home file. Keep each rule in one place. Indices contain only
+active topics, read triggers, and filenames; historical documents remain searchable
+without being loaded automatically.
+
+After editing either `CLAUDE.md`, run `sync-codex-claude`, then
+`sync-codex-claude --check`. Check mode fails on drift without changing files;
+sync rejects malformed/duplicate markers and unmanaged instruction assignments.
+Only the marked regions are copied, shared first and private second.
+
+`settings.json` is not linked because Claude Code writes to it; copy changes into
+`claude/settings.json` by hand when they are worth sharing.
 
 ## Node: Volta and nvm
 
