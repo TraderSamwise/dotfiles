@@ -1,6 +1,11 @@
 import os
 import json
 import subprocess
+from datetime import datetime, timezone
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 import tempfile
 import unittest
 from pathlib import Path
@@ -101,22 +106,260 @@ class QueueCase(unittest.TestCase):
         self.assertIn("belongs to claude-overseer, assigned to codex-worker", result.stderr)
         self.assertIn("you are codex-other", result.stderr)
 
-    def test_done_still_requires_proof_for_assigned_agent(self):
+    def test_done_requires_nothing(self):
+        """
+        2026-10-17: "done requires nothing holy fuck. done should be the first
+        thing you do the second you are done." Requiring evidence is what
+        taught agents to sit on `doing` assembling it.
+        """
         item_id = self.add_item()
         self.start_item(item_id, assignee="codex-worker")
 
-        result = self.run_queue(
-            "codex-worker",
-            "done",
-            item_id,
-            "--commit",
-            "abc1234",
-            "--clauses",
-            "1 requirement: DONE",
+        result = self.run_queue("codex-worker", "done", item_id)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("done", result.stdout)
+
+    def test_todo_can_close_without_passing_through_doing(self):
+        item_id = self.add_item()
+
+        result = self.run_queue("claude-overseer", "done", item_id)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("todo", result.stdout)
+        self.assertIn("done", result.stdout)
+
+    def test_delete_removes_an_item_from_every_view(self):
+        item_id = self.add_item()
+
+        deleted = self.run_queue("claude-overseer", "delete", item_id, "--why", "cannot reproduce")
+        self.assertEqual(deleted.returncode, 0, deleted.stderr)
+
+        for view in (["ls"], ["ls", "--everything"], ["backlog"]):
+            listing = self.run_queue("claude-overseer", *view)
+            self.assertNotIn(item_id, listing.stdout, f"{view} still shows it")
+        # The log keeps every event: a delete is a tombstone, not a rewrite.
+        self.assertIn('"kind": "delete"', self.queue_log().read_text())
+
+    def _old_todo(self, item_id, days):
+        from datetime import datetime, timedelta, timezone
+
+        when = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+        return {
+            "id": item_id,
+            "workId": item_id,
+            "kind": "add",
+            "at": when,
+            "ask": f"queued {days} days ago",
+            "by": "sam",
+            "tree": self.repo.name,
+        }
+
+    def test_a_dropped_ruling_stays_dropped_and_never_returns_as_todo(self):
+        """
+        `dropped` was Sam answering that work would not be done. His rule now is
+        that such work is deleted, so reading the old state as `todo` brought 18
+        already-killed items back onto the list. A ruling is a tombstone.
+        """
+        added = self._old_todo("sam-1", 1)
+        self.write_events(
+            [
+                added,
+                {
+                    "id": "sam-1",
+                    "workId": "sam-1",
+                    "kind": "state",
+                    "state": "dropped",
+                    "at": added["at"],
+                    "why": "sam said drop it",
+                    "by": "sam",
+                    "tree": self.repo.name,
+                },
+            ]
+        )
+        for view in (["ls"], ["ls", "--everything"], ["backlog"], ["next"]):
+            self.assertNotIn("sam-1", self.run_queue("sam", *view).stdout, view)
+
+    def test_a_wontdo_proposal_returns_to_the_list_for_a_real_decision(self):
+        """
+        `wontdo` was an agent PROPOSING to abandon something, never Sam's
+        answer, so unlike `dropped` it must come back as todo.
+        """
+        added = self._old_todo("sam-2", 1)
+        self.write_events(
+            [
+                added,
+                {
+                    "id": "sam-2",
+                    "workId": "sam-2",
+                    "kind": "state",
+                    "state": "wontdo",
+                    "at": added["at"],
+                    "why": "cannot reproduce",
+                    "by": "claude",
+                    "tree": self.repo.name,
+                },
+            ]
+        )
+        self.assertIn("sam-2", self.run_queue("sam", "ls").stdout)
+
+    def test_a_todo_older_than_seven_days_leaves_the_working_list(self):
+        self.write_events([self._old_todo("sam-1", 9), self._old_todo("sam-2", 2)])
+
+        working = self.run_queue("sam", "ls")
+        self.assertIn("sam-2", working.stdout)
+        self.assertNotIn("sam-1", working.stdout, "a 9-day-old todo is backlog")
+
+        shelved = self.run_queue("sam", "backlog")
+        self.assertIn("sam-1", shelved.stdout)
+        self.assertNotIn("sam-2", shelved.stdout, "backlog is only the shelved ones")
+
+    def test_next_never_hands_back_a_backlog_item(self):
+        self.write_events([self._old_todo("sam-1", 30)])
+
+        result = self.run_queue("sam", "next")
+
+        self.assertNotIn("sam-1", result.stdout, "next must not even name a backlog item")
+        self.assertIn("1 in the backlog", result.stdout)
+
+    def test_a_future_timestamp_cannot_pin_a_stale_todo_on_the_list(self):
+        """`touched_at` took max() over history, so one skewed `at` won forever."""
+        from datetime import timedelta
+
+        added = self._old_todo("sam-1", 400)
+        ahead = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(timespec="seconds")
+        self.write_events([added, {**added, "kind": "note", "at": ahead, "note": "skewed"}])
+
+        self.assertNotIn("sam-1", self.run_queue("sam", "ls").stdout)
+        self.assertIn("sam-1", self.run_queue("sam", "backlog").stdout)
+
+    def test_a_future_add_does_not_pin_an_item_or_head_the_queue(self):
+        """`touched_at` filtered future stamps; `added_at` did not."""
+        from datetime import timedelta
+
+        ahead = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(timespec="seconds")
+        self.write_events([
+            {"id": "sam-5", "workId": "sam-5", "kind": "add", "at": ahead,
+             "ask": "dated a year ahead", "by": "sam", "tree": self.repo.name},
+            self._old_todo("sam-6", 1),
+        ])
+
+        working = self.run_queue("sam", "ls").stdout
+        self.assertNotIn("sam-5", working, "a future add must not sit on the list")
+        self.assertIn("sam-6", working)
+        self.assertIn("sam-6", self.run_queue("sam", "next").stdout)
+
+    def test_an_undated_item_sorts_last_among_the_shelved(self):
+        """
+        `newest_first`'s `datetime.min` fallback had no coverage. An undated
+        item is always shelved, so the backlog is the only view that can order
+        one against a dated item.
+        """
+        undated = {"id": "sam-4", "workId": "sam-4", "kind": "add", "ask": "no date",
+                   "by": "sam", "tree": self.repo.name}
+        self.write_events([undated, self._old_todo("sam-3", 30)])
+
+        shelved = self.run_queue("sam", "backlog").stdout
+        self.assertIn("sam-3", shelved)
+        self.assertIn("sam-4", shelved)
+        self.assertLess(
+            shelved.index("sam-3"), shelved.index("sam-4"),
+            f"a dated item must outrank an undated one:\n{shelved}",
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("done requires --proof", result.stderr)
+    def test_a_wontdo_proposal_does_not_undo_a_drop_sam_already_made(self):
+        """`wontdo` maps to todo, so it counted as a revival of a real drop."""
+        added = self._old_todo("sam-8", 2)
+        at = added["at"]
+        self.write_events([
+            added,
+            {**added, "kind": "state", "state": "dropped", "at": at, "why": "sam said no"},
+            {**added, "kind": "state", "state": "wontdo", "at": at, "why": "agent proposal"},
+        ])
+
+        for view in (["ls"], ["ls", "--everything"], ["backlog"]):
+            self.assertNotIn("sam-8", self.run_queue("sam", *view).stdout, view)
+
+    def test_an_item_with_no_usable_timestamp_is_shelved_not_silently_dropped(self):
+        self.write_events([{
+            "id": "sam-7", "workId": "sam-7", "kind": "add", "ask": "no timestamp",
+            "by": "sam", "tree": self.repo.name,
+        }])
+
+        self.assertNotIn("sam-7", self.run_queue("sam", "ls").stdout)
+        self.assertIn("sam-7", self.run_queue("sam", "backlog").stdout)
+
+    def test_newest_first_follows_time_not_the_id_counter(self):
+        """
+        The id counter is per agent, so sorting by its number ranked a stale
+        `aaaaaa-83` above a `zzzzzz-1` captured today.
+        """
+        old_high = self._old_todo("aaaaaa-83", 3)
+        new_low = self._old_todo("zzzzzz-1", 0)
+        self.write_events([old_high, new_low])
+
+        listed = self.run_queue("sam", "ls", "--everything").stdout
+        self.assertLess(
+            listed.index("zzzzzz-1"), listed.index("aaaaaa-83"),
+            f"today's item must come first:\n{listed}",
+        )
+        taken = self.run_queue("sam", "next", "--anyone").stdout
+        self.assertIn("zzzzzz-1", taken)
+        self.assertNotIn("aaaaaa-83", taken)
+
+    def test_the_backlog_boundary_sits_exactly_at_seven_days(self):
+        self.write_events([self._old_todo("sam-1", 7), self._old_todo("sam-2", 6)])
+
+        working = self.run_queue("sam", "ls").stdout
+        self.assertIn("sam-2", working, "six days is still the working list")
+        self.assertNotIn("sam-1", working, "seven days has left it")
+
+    def test_an_item_reopened_today_comes_back_however_old_its_capture(self):
+        """
+        Sam's rule is a todo he has NOT TOUCHED for seven days. Keying the
+        backlog on first capture hid an item the moment he reopened it.
+        """
+        added = self._old_todo("sam-1", 30)
+        self.write_events([
+            added,
+            {**added, "kind": "state", "state": "done", "at": added["at"]},
+            {**added, "kind": "state", "state": "todo", "at": now_iso()},
+        ])
+
+        self.assertIn("sam-1", self.run_queue("sam", "ls").stdout)
+        self.assertNotIn("sam-1", self.run_queue("sam", "backlog").stdout)
+
+    def test_a_dropped_item_sam_reopened_survives_with_its_history(self):
+        """
+        `947602-83` reads `dropped, todo, ..., done` in the real log. Honouring
+        the tombstone blindly erased it and seven others, history included.
+        """
+        added = self._old_todo("sam-9", 20)
+        at = added["at"]
+        self.write_events([
+            added,
+            {**added, "kind": "state", "state": "dropped", "at": at, "why": "no"},
+            {**added, "kind": "state", "state": "todo", "at": at},
+            {**added, "kind": "state", "state": "doing", "at": at, "by": "claude"},
+            {**added, "kind": "state", "state": "done", "at": at},
+        ])
+
+        shown = self.run_queue("sam", "show", "sam-9")
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertIn("done", shown.stdout)
+        self.assertIn("sam-9", self.run_queue("sam", "ls", "--everything").stdout)
+
+    def test_next_takes_the_newest_item_not_the_oldest(self):
+        """
+        2026-10-17: "assume the most recently added things are the things i
+        care about the most."
+        """
+        self.write_events([self._old_todo("sam-1", 3), self._old_todo("sam-2", 1)])
+
+        result = self.run_queue("sam", "next")
+
+        self.assertIn("sam-2", result.stdout)
+        self.assertNotIn("sam-1", result.stdout)
 
     def test_done_still_refuses_unmet_clauses_for_assigned_agent(self):
         item_id = self.add_item()

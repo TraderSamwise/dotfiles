@@ -1,0 +1,17 @@
+#!/bin/sh
+# A prompt flag's VALUE is text, so `-p "--gpt"` must not route; everything
+# else before `--` is a flag, because `claude -p "x" --output-format json` is
+# documented usage. `--` ends the scan even in a value slot, matching
+# flag_positions in bin/claude-router; the two must agree.
+skip=0
+for arg do
+  case "$arg" in
+    --) break ;;
+  esac
+  if [ "$skip" = 1 ]; then skip=0; continue; fi
+  case "$arg" in
+    -p | --print | --prompt) skip=1 ;;
+    --gpt) exec /usr/bin/python3 "$HOME/.local/bin/claude-router" gpt "$@" ;;
+  esac
+done
+exec "$HOME/.volta/bin/claude" "$@"

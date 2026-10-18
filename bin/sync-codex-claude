@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -38,6 +39,8 @@ def toml_multiline_basic(value: str) -> str:
 
 def shared_region(source: Path) -> str:
     text = source.read_text()
+    if text.count(SYNC_START) != 1 or text.count(SYNC_END) != 1:
+        sys.exit(f"error: {source} must contain exactly one pair of sync markers.")
     match = SYNC_REGION_RE.search(text)
     if not match:
         sys.exit(
@@ -59,17 +62,91 @@ def source_for_codex() -> tuple[str, list[Path]]:
     return f"{HEADER}\n\n{GENERATED_REMINDER}\n\n" + "\n\n".join(bodies) + "\n", present
 
 
+TABLE_HEADER_RE = re.compile(r"^\[", re.M)
+
+
 def replace_managed_block(config: str, block: str) -> str:
-    if START in config and END in config:
-        before, rest = config.split(START, 1)
-        _, after = rest.split(END, 1)
-        return before.rstrip() + "\n\n" + block + "\n\n" + after.lstrip()
-    # Strip any stale block referencing a different machine's HOME.
-    config = STALE_BLOCK_RE.sub("", config)
-    return block + "\n\n" + config.lstrip()
+    begins = re.findall(
+        r"^# BEGIN managed: .+?/CLAUDE\.md -> Codex developer_instructions$", config, re.M
+    )
+    ends = re.findall(
+        r"^# END managed: .+?/CLAUDE\.md -> Codex developer_instructions$", config, re.M
+    )
+    matches = list(STALE_BLOCK_RE.finditer(config))
+    if len(begins) != len(ends) or len(begins) > 1 or len(matches) != len(begins):
+        raise ValueError("Codex config has duplicate or incomplete managed instruction markers.")
+    remainder = ""
+    if matches:
+        managed = matches[0]
+        body = managed.group(0).split("\n", 1)[1].rsplit("# END managed:", 1)[0]
+        assignments = re.findall(r"^[ \t]*developer_instructions\s*=", body, re.M)
+        instruction = re.search(
+            r'^developer_instructions[ \t]*=[ \t]*"""(?:\\.|"(?!"")|[^"\\])*"""[ \t]*\n?',
+            body,
+            re.M | re.S,
+        )
+        if len(assignments) != 1 or instruction is None:
+            raise ValueError("Managed instructions must contain one multiline instruction assignment.")
+        remainder = body[:instruction.start()] + body[instruction.end():]
+        # The remainder is re-emitted AFTER the managed block, so a table
+        # header among the preserved runtime settings would adopt every root
+        # key that follows it. `assert_top_level` only looks above the block,
+        # so it cannot see a table the sync itself moved down.
+        table = TABLE_HEADER_RE.search(remainder)
+        if table:
+            line = remainder[: table.start()].count("\n") + 1
+            raise ValueError(
+                "Managed instruction markers contain a [table] header "
+                f"(line {line} of the preserved settings). It would adopt the "
+                "root keys below the block. Move it out of the managed markers "
+                "by hand."
+            )
+    outside = STALE_BLOCK_RE.sub(lambda _: remainder, config)
+    # An indented assignment is still a root key to TOML, and missing it
+    # appended a second one, so the emitted file would not parse at all.
+    if re.search(r"^[ \t]*developer_instructions\s*=", outside, re.M):
+        raise ValueError("Codex config has unmanaged developer_instructions; refusing to overwrite them.")
+    if matches:
+        before = config[:managed.start()]
+        after = remainder + config[managed.end():]
+        prefix = before.rstrip()
+        return assert_top_level((prefix + "\n\n" if prefix else "") + block + "\n\n" + after.lstrip())
+    return assert_top_level(block + "\n\n" + config.lstrip())
+
+
+def assert_top_level(config: str) -> str:
+    """
+    `developer_instructions` must be a top-level key, not a table member.
+
+    Comparing text alone let the gate pass while Codex saw nothing. Repairing
+    it automatically is worse: once a `[table]` is prepended, the root keys
+    below it are syntactically members of that table, and nothing in the file
+    says which the user meant -- two attempts at hoisting swept `model`,
+    `approval_policy`, `sandbox_mode` and forty more into an mcp server. So
+    this refuses and names the table instead of guessing.
+    """
+    position = config.find(START)
+    if position < 0:
+        raise ValueError("Generated Codex config lost its managed instruction markers.")
+    header = next(
+        (match for match in TABLE_HEADER_RE.finditer(config) if match.start() < position), None
+    )
+    if header:
+        line = config[: header.start()].count("\n") + 1
+        raise ValueError(
+            f"A [table] at line {line} would adopt root keys that must stay at "
+            "the document root, so Codex would read the wrong settings or no "
+            "instructions at all. Move every [table] header below the last "
+            "root-level assignment by hand; doing it here cannot tell your root "
+            "keys from that table's members."
+        )
+    return config
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Sync global agent instructions into Codex.")
+    parser.add_argument("--check", action="store_true", help="Fail on drift without changing files.")
+    args = parser.parse_args()
     instructions, present = source_for_codex()
     block = (
         f"{START}\n"
@@ -77,7 +154,14 @@ def main() -> None:
         f"{END}"
     )
     current = TARGET.read_text() if TARGET.exists() else ""
-    TARGET.write_text(replace_managed_block(current, block))
+    updated = replace_managed_block(current, block)
+    if args.check:
+        if current != updated:
+            sys.exit("error: Codex instructions are out of sync; run sync-codex-claude.")
+        print("Codex instructions match the global sources.")
+        return
+    if current != updated:
+        TARGET.write_text(updated)
     synced = len(instructions.splitlines())
     total = sum(len(s.read_text().splitlines()) for s in present)
     names = " + ".join(str(s) for s in present)
@@ -85,4 +169,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError) as error:
+        sys.exit(f"error: {error}")

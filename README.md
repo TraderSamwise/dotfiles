@@ -82,10 +82,20 @@ which bundles its own glyphs: `brew install --cask font-meslo-for-powerlevel10k`
 | `claude/settings.json` | copied once to `~/.claude/settings.json` if absent | Model, effort, auto mode, notifications, status line and hook wiring |
 | `codex/skills/**` | `~/.codex/skills/` | Codex versions of plan-execute, review-coderabbit, review-copilot, current-branch-pr, commit-review-flow, setup-worktree |
 | `bin/sync-codex-claude` | `~/.local/bin/sync-codex-claude` | Builds Codex `developer_instructions` from the `codex:sync` regions of `~/.claude/CLAUDE.md` then `~/CLAUDE.md` |
+| `bin/claude-router` | `~/.local/bin/claude-router` | Opt-in `claude --gpt` settings and local proxy LaunchAgent controls |
 
-After editing either `CLAUDE.md`, run `sync-codex-claude`. `settings.json` is not
-linked because Claude Code writes to it; copy changes into `claude/settings.json`
-by hand when they are worth sharing.
+Portable policy lives in the shared file; private service context and the memory
+index live in the home file. Keep each rule in one place. Indices contain only
+active topics, read triggers, and filenames; historical documents remain searchable
+without being loaded automatically.
+
+After editing either `CLAUDE.md`, run `sync-codex-claude`, then
+`sync-codex-claude --check`. Check mode fails on drift without changing files;
+sync rejects malformed/duplicate markers and unmanaged instruction assignments.
+Only the marked regions are copied, shared first and private second.
+
+`settings.json` is not linked because Claude Code writes to it; copy changes into
+`claude/settings.json` by hand when they are worth sharing.
 
 ## Node: Volta and nvm
 
@@ -96,6 +106,30 @@ installs what is missing and writes `~/.local/volta-shims`: `zsh/zshenv` removes
 Volta's own `bin` from PATH, so a Volta binary is only reachable when tools.txt names
 a shim for it. nvm owns plain `node`; bootstrap installs the latest LTS as its default
 when none is set.
+
+The Claude shim comes from `volta/claude`. Ordinary `claude` directly executes
+the Volta Claude binary with the original arguments and environment. `claude --gpt`
+opts into the local `claude-codex` proxy, with a 1M GPT model and settings merged
+into any existing `--settings` file (including Aimux hooks). Resume the same saved
+conversation with `claude --gpt --resume`; return with `claude --resume --model opus`.
+Switch modes by exiting and resuming, rather than changing providers in `/model`.
+
+Install the third-party `fcakyon/claude-code-with-codex` binary separately as
+`~/.local/bin/claude-codex`, then run `claude-router install` and `claude-router start`.
+The macOS LaunchAgent keeps one proxy on `127.0.0.1:18765` across terminal exits
+and restarts it after a crash. `claude-router status`, `health`, `restart`, `stop`,
+and `logs` control that service. Linux uses an enabled systemd user service and
+the same commands; headless hosts need user lingering for startup before login.
+Native Claude does not depend on the service. The helper uses `/usr/bin/python3`;
+neither Claude's package nor its updater is modified.
+
+This is a standard layer of the `machines` provisioning skill, available to
+Claude and Codex through bootstrap. `agents/defaults.json` → `claude_gpt` declares
+the GPT model, small model, context threshold, reviewed proxy release and local
+port. The helper reads that declaration per invocation. Installing a service
+definition is separate from starting it, so provisioning can preserve active
+work. Converge each machine individually; the workflow covers auth, service
+startup, health, restart and a real GPT response.
 
 ## Chrome DevTools MCP
 

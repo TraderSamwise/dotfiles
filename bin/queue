@@ -84,72 +84,74 @@ ROOT = Path.home() / "cs" / "docs" / "agent-queue"
 # doing is when actively coding it or if we have to push debug logs or if there
 # is a real need for verification. otherwise done is done."
 #
-# So `doing` is not a holding pen. It means somebody has their hands on it —
-# writing it, or waiting on something that genuinely cannot be settled yet.
-# The three below it are exits rather than steps: `blocked` is waiting on Sam,
-# `wontdo` is an agent proposing to abandon something and still listing until
-# he rules, `dropped` is his call alone.
+# So `doing` is not a holding pen. It means somebody has their hands on it.
+# There is no fourth state: work that will not be done is deleted, and waiting
+# on Sam is still todo.
 STATES = (
     "todo",
     "doing",
     "done",
-    "blocked",
-    "wontdo",
-    "dropped",
 )
 
-# What the log may still hold from before 2026-09-03, and what each becomes on
-# the way in. The log is append-only, so old rows are read forward rather than
-# rewritten — `landed` and `shipped` were both "done", and `verified` was Sam
-# confirming a thing that was already done.
+# What the log may still hold, and what each becomes on the way in. The log is
+# append-only, so old rows are read forward rather than rewritten.
 RETIRED = {
     "landed": "done",
     "shipped": "done",
     "verified": "done",
     # 2026-09-04: "todo, doing, done. thats it."
     "queued": "todo",
+    # 2026-10-17: "only 3 states." `blocked` was waiting on Sam, which is just
+    # todo. `wontdo` was an agent PROPOSING to abandon something and never Sam's
+    # answer, so it goes back on the list for a real decision.
+    "blocked": "todo",
+    "wontdo": "todo",
 }
 
-# What may follow what. A transition absent from here is refused, so nothing can
-# skip from "todo" to "done" — an item nobody started is an item nobody did.
+# `dropped` was Sam ruling that something would not be done, and his rule now is
+# that such work is DELETED. Reading it as `todo` resurrected 18 items he had
+# already killed, which surfaced on 2026-10-18. A retired ruling is a tombstone.
+RETIRED_AS_DELETED = ("dropped",)
+
+# What may follow what. `todo -> done` is allowed on purpose: 2026-10-17,
+# "done should be the first thing you do the second you are done." Making an
+# agent pass through `doing` to close something already finished is friction
+# that buys nothing.
 TRANSITIONS: dict[str, tuple[str, ...]] = {
-    "todo": ("doing", "blocked", "wontdo", "dropped"),
-    "doing": ("done", "blocked", "wontdo", "dropped", "todo"),
+    "todo": ("doing", "done"),
+    "doing": ("done", "todo"),
     # Reopened by Sam saying so, which is what a follow-up is — straight back
     # to the list, not through `doing`, because he reports one before anybody
     # has picked it up.
-    "done": ("todo", "doing", "blocked"),
-    "blocked": ("todo", "doing", "wontdo", "dropped"),
-    # An agent's proposal to abandon something. It STILL LISTS until Sam rules
-    # on it, which is the whole point: the tool must not give an agent a way to
-    # make an inconvenient request disappear.
-    "wontdo": ("dropped", "todo", "doing"),
-    "dropped": ("todo",),
+    "done": ("todo", "doing"),
 }
 
-# Evidence each transition must carry. The point of the whole tool, and the part
-# that did NOT get simpler when the states did: `done` wants the commit AND
-# something that was actually run, because the failure this file exists to stop
-# was a claim made from a commit alone.
+# Evidence each transition must carry.
+#
+# `done` requires NOTHING, as of 2026-10-17: "done requires nothing holy fuck.
+# done should be the first thing you do the second you are done." A commit or a
+# merge is the gate, so anything demanded on top of it taxed the one transition
+# that must never be deferred — and the tax is what made agents hold items open
+# waiting to assemble evidence. `--commit`, `--proof` and `--clauses` are still
+# accepted and still recorded when given. They are not conditions.
 REQUIRED: dict[str, str] = {
     "doing": "by",
-    "done": "commit",
-    "blocked": "why",
-    "wontdo": "why",
-    "dropped": "why",
 }
 
-# Fields a transition needs beyond the first. `done` is the only one.
-ALSO_REQUIRED: dict[str, tuple[str, ...]] = {"done": ("proof", "clauses")}
+ALSO_REQUIRED: dict[str, tuple[str, ...]] = {}
 
 MARK = {
     "todo": "·",
     "doing": "▸",
     "done": "✓",
-    "blocked": "⊘",
-    "wontdo": "?",
-    "dropped": "✗",
 }
+
+# A todo nobody has touched for this long stops being the working list. It is
+# not a state and nothing moves it: `ls` and `next` derive it and skip it, so an
+# agent cannot pick one up, and `queue backlog` is the only way to see them.
+# Nothing to schedule, nothing to migrate, and no window where an item sits in
+# the wrong lane because a timer did not fire.
+BACKLOG_AFTER_DAYS = 7
 
 
 def now() -> str:
@@ -325,10 +327,37 @@ def item_matches_token(item: dict, token: str) -> bool:
     return token in (item.get("id"), item.get("workId"))
 
 
+def revived_after(events: list[dict]) -> set[int]:
+    """
+    Indices of retired-as-deleted events that a later event undoes.
+
+    A `dropped` ruling is a tombstone, but Sam reopened some of them before the
+    state was retired -- `947602-83` reads `dropped, todo, ..., done`. Honouring
+    the tombstone blindly erased it and seven others, history and all. A note
+    after a drop is not a revival; an `add` or a real state transition is.
+    """
+    last_revival: dict[str, int] = {}
+    for index, e in enumerate(events):
+        work_id = event_work_id(e)
+        if not work_id:
+            continue
+        if e.get("kind") == "add" or e.get("state") in STATES:
+            last_revival[work_id] = index
+    honoured = set()
+    for index, e in enumerate(events):
+        if e.get("state") not in RETIRED_AS_DELETED:
+            continue
+        work_id = event_work_id(e)
+        if work_id and last_revival.get(work_id, -1) < index:
+            honoured.add(index)
+    return honoured
+
+
 def fold(events: list[dict]) -> dict[str, dict]:
     """The current state of every item, replayed from the log."""
     items: dict[str, dict] = {}
-    for e in events:
+    tombstones = revived_after(events)
+    for index, e in enumerate(events):
         eid = e.get("id")
         work_id = event_work_id(e)
         if not eid or not work_id:
@@ -349,6 +378,9 @@ def fold(events: list[dict]) -> dict[str, dict]:
                 "evidence": {},
             }
             continue
+        if e.get("kind") == "delete":
+            items.pop(work_id, None)
+            continue
         item = items.get(work_id)
         if not item:
             continue
@@ -357,6 +389,9 @@ def fold(events: list[dict]) -> dict[str, dict]:
             continue
         if e.get("kind") == "hand":
             item["owner"] = e.get("to")
+            continue
+        if index in tombstones:
+            items.pop(work_id, None)
             continue
         state = RETIRED.get(e.get("state"), e.get("state"))
         if state in STATES:
@@ -372,7 +407,7 @@ def fold(events: list[dict]) -> dict[str, dict]:
 
 
 # Ids stay short enough to type and to say out loud, but they never recycle.
-CLOSED = ("done", "dropped")
+CLOSED = ("done",)
 
 
 def next_id(events: list[dict], who: str) -> str:
@@ -392,6 +427,73 @@ def next_id(events: list[dict], who: str) -> str:
         if eid.startswith(f"{stem}-") and eid.rpartition("-")[2].isdigit()
     )
     return f"{stem}-{(mine[-1] + 1) if mine else 1}"
+
+
+def parse_at(value: object) -> datetime | None:
+    """One naive or malformed timestamp must not take down every list view."""
+    try:
+        when = datetime.fromisoformat(value or "")  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def added_at(item: dict) -> datetime | None:
+    """
+    When the ask was first captured, from the log rather than from memory.
+
+    A future stamp is no more trustworthy here than in `touched_at`: an `add`
+    dated a year ahead kept its item on the working list and at the head of
+    `next`.
+    """
+    when = parse_at(item.get("added"))
+    return when if when and when <= datetime.now(timezone.utc) else None
+
+
+def touched_at(item: dict) -> datetime | None:
+    """
+    The last time anything happened to the item.
+
+    Sam's rule is a todo he has NOT TOUCHED for seven days, so an item he
+    reopens today belongs back on the working list however old its first
+    capture is. Keying the backlog on the capture time hid it instantly.
+    """
+    stamps = [parse_at(e.get("at")) for e in item.get("history", [])]
+    seen = [when for when in stamps if when]
+    # A skewed clock or a hand-edited log must not pin a stale todo forever,
+    # and clamping a future stamp to now would read as a fresh touch, so one
+    # is ignored rather than trusted.
+    past = [when for when in seen if when <= datetime.now(timezone.utc)]
+    if past:
+        return max(past)
+    return added_at(item)
+
+
+def is_backlog(item: dict) -> bool:
+    """
+    A todo nobody has touched for BACKLOG_AFTER_DAYS.
+
+    Derived on every read, so there is no lane to migrate into and no timer to
+    miss. `ls` and `next` skip these, which is what makes "never work the
+    backlog on your own" a property of the tool rather than a rule an agent has
+    to remember having read.
+    """
+    if item.get("state") != "todo":
+        return False
+    at = touched_at(item)
+    if at is None:
+        return True
+    return (datetime.now(timezone.utc) - at).days >= BACKLOG_AFTER_DAYS
+
+
+def newest_first(item: dict) -> tuple[datetime, tuple[int, str]]:
+    """
+    2026-10-17: "assume the most recently added things are the things i care
+    about the most." Sorting by the id's number instead ranked a four-day-old
+    `aaaaaa-83` above a `zzzzzz-1` added today, because the counter is per
+    agent and says nothing about time across agents.
+    """
+    return (added_at(item) or datetime.min.replace(tzinfo=timezone.utc), id_order(item["id"]))
 
 
 def id_order(eid: str) -> tuple[int, str]:
@@ -618,12 +720,6 @@ def cmd_move(args, state: str) -> None:
 
     detail = event.get("proof") or event.get("commit") or event.get("why") or event.get("by") or ""
     print(f"{item['id']}  {was} → {state}   {detail[:70]}")
-    if state == "wontdo":
-        print("        Proposed only. It stays on the list until Sam rules on it:")
-        print(f"        queue drop {item['id']} --why '...'   or   queue requeue {item['id']}")
-    if state == "dropped":
-        print("        Dropped. If you are not Sam, this was not yours to decide —")
-        print(f"        `queue wontdo {item['id']} --why '...'` is the agent's path.")
 
 
 def cmd_note(args) -> None:
@@ -660,13 +756,19 @@ def cmd_ls(args) -> None:
         if args.mine:
             rows = [i for i in rows if owner_of(i) in (handle(), None)]
         if not args.state and not args.everything:
-            rows = [i for i in rows if i["state"] not in ("done", "dropped")]
+            rows = [i for i in rows if i["state"] not in CLOSED]
+        # The working list is what Sam still cares about. Anything that has sat
+        # in todo past the cutoff is only visible when asked for by name.
+        wants_backlog = getattr(args, "backlog", False)
+        rows = [i for i in rows if is_backlog(i) == wants_backlog]
         if not rows:
             continue
         if len(keys) > 1:
             print(f"\n{key}")
         order = {s: n for n, s in enumerate(STATES)}
-        for item in sorted(rows, key=lambda i: (order.get(i["state"], 9), id_order(i["id"]))):
+        for item in sorted(
+            rows, key=lambda i: (order.get(i["state"], 9), newest_first(i)), reverse=True
+        ):
             shown += 1
             where = item.get("tree")
             who = owner_of(item)
@@ -681,11 +783,39 @@ def cmd_ls(args) -> None:
             for line in body[1:]:
                 print(" " * len(head) + line.strip())
     if shown == 0:
-        print(
-            f"Nothing outstanding in {worktree()}."
-            if not args.project
-            else f"Nothing outstanding in {repo_key()}."
-        )
+        what = "in the backlog" if getattr(args, "backlog", False) else "outstanding"
+        where = worktree() if not args.project else repo_key()
+        print(f"Nothing {what} in {where}.")
+
+
+def cmd_delete(args) -> None:
+    """
+    Remove an ask that will not be done.
+
+    2026-10-17: "if something is 'wont do' delete it." There is no state for
+    abandoned work any more, because a state nobody reads is a worse record
+    than no record. The log stays append-only -- this appends a tombstone, so
+    `queue show` can still account for the id, and every view drops it.
+    """
+    key = repo_key()
+    log, _ = paths(key)
+    items = fold(read_events(log))
+    item = resolve(items, args.id)
+    append(
+        log,
+        {
+            "id": item["id"],
+            "workId": item.get("workId", item["id"]),
+            "kind": "delete",
+            "at": now(),
+            "by": handle(),
+            **({"why": args.why} if args.why else {}),
+        },
+    )
+    rebuild(key)
+    print(f"{item['id']}  deleted")
+    for line in wrap(item["ask"], 84):
+        print("  " + line.strip())
 
 
 def cmd_hand(args) -> None:
@@ -721,9 +851,13 @@ def cmd_next(args) -> None:
     The one command an agent should run to find work.
 
     `ls` is a view and it tempted an agent into treating six projects as one
-    list. This takes the oldest unclaimed item in THIS repo and claims it in the
+    list. This takes the NEWEST unclaimed item in THIS repo and claims it in the
     same breath, so "what should I do next" cannot answer with somebody else's
     job.
+
+    Newest first because 2026-10-17: "assume the most recently added things are
+    the things i care about the most." Backlog items are not candidates at all —
+    working one unasked is the thing the cutoff exists to prevent.
     """
     key = repo_key()
     me = handle()
@@ -733,20 +867,26 @@ def cmd_next(args) -> None:
         i
         for i in items.values()
         if i["state"] == "todo"
+        and not is_backlog(i)
         and in_tree(i)
         and (args.anyone or owner_of(i) in (me, None))
     ]
     if not free:
         print(f"Nothing queued for {me} in {worktree()}.")
-        for item in sorted(items.values(), key=lambda i: id_order(i["id"])):
+        shelved = 0
+        for item in sorted(items.values(), key=newest_first, reverse=True):
             if item["state"] != "todo":
                 continue
-            if not in_tree(item):
+            if is_backlog(item):
+                shelved += 1
+            elif not in_tree(item):
                 print(f"  {item['id']} was raised in {item.get('tree')}.")
             elif owner_of(item):
                 print(f"  {item['id']} is {owner_of(item)}'s.")
+        if shelved:
+            print(f"  {shelved} in the backlog. `queue backlog` to look, when Sam asks.")
         return
-    item = sorted(free, key=lambda i: id_order(i["id"]))[0]
+    item = sorted(free, key=newest_first, reverse=True)[0]
     append(
         log,
         {
@@ -852,7 +992,7 @@ def rebuild(key: str) -> None:
             continue
         lines.append(f"## {state} ({len(rows)})")
         lines.append("")
-        for item in sorted(rows, key=lambda i: id_order(i["id"])):
+        for item in sorted(rows, key=newest_first):
             lines.append(f"- **{item['id']}** — {item['ask']}")
             if item.get("workId") and item["workId"] != item["id"]:
                 lines.append(f"  - `workId`: {item['workId']}")
@@ -883,10 +1023,7 @@ def main() -> None:
 
     for name, state, extra in (
         ("start", "doing", ("by",)),
-        ("done", "done", ("commit", "proof")),
-        ("block", "blocked", ("why",)),
-        ("wontdo", "wontdo", ("why",)),
-        ("drop", "dropped", ("why",)),
+        ("done", "done", ()),
         ("requeue", "todo", ()),
     ):
         s = sub.add_parser(name, help=f"→ {state}")
@@ -901,14 +1038,32 @@ def main() -> None:
     n.add_argument("text")
     n.set_defaults(fn=cmd_note)
 
-    l = sub.add_parser("ls", help="what is outstanding")
-    l.add_argument("--state", choices=STATES)
-    l.add_argument("--project", action="store_true", help="every worktree of this project")
-    l.add_argument("--mine", action="store_true", help="only this agent's items")
-    l.add_argument("--everything", action="store_true", help="include done and dropped")
+    def add_ls_filters(parser):
+        parser.add_argument("--state", choices=STATES)
+        parser.add_argument("--project", action="store_true", help="every worktree of this project")
+        parser.add_argument("--mine", action="store_true", help="only this agent's items")
+        parser.add_argument("--everything", action="store_true", help="include done")
+        return parser
+
+    l = add_ls_filters(sub.add_parser("ls", help="what is outstanding"))
+    l.add_argument(
+        "--backlog",
+        action="store_true",
+        help=f"ONLY todos older than {BACKLOG_AFTER_DAYS} days, which ls hides by default",
+    )
     l.set_defaults(fn=cmd_ls)
 
-    nx = sub.add_parser("next", help="start this agent's oldest todo item here")
+    # The same filters, because the point of looking at the backlog is to work
+    # through it WITH Sam -- per agent, per project -- not to read one flat dump.
+    b = add_ls_filters(sub.add_parser("backlog", help=f"todos older than {BACKLOG_AFTER_DAYS} days"))
+    b.set_defaults(fn=cmd_ls, backlog=True)
+
+    d = sub.add_parser("delete", help="remove an item that will not be done")
+    d.add_argument("id")
+    d.add_argument("--why", help="recorded in the log, not required")
+    d.set_defaults(fn=cmd_delete)
+
+    nx = sub.add_parser("next", help="start this agent's newest todo item here")
     nx.add_argument(
         "--anyone",
         action="store_true",

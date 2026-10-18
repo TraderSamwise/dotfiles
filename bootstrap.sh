@@ -103,6 +103,7 @@ link opencode/opencode.json "$HOME/.config/opencode/opencode.json"
 link bin/git-merge "$HOME/.local/bin/git-merge"
 link bin/cs "$HOME/.local/bin/cs"
 link bin/queue "$HOME/.local/bin/queue"
+link bin/claude-router "$HOME/.local/bin/claude-router"
 for script in canary chrome-devtools-mcp-wrapper.sh chrome-mcp-healthcheck.sh chrome-mcp-log-trim.sh chrome-mcp-restart; do
   link "bin/$script" "$HOME/.local/bin/$script"
 done
@@ -150,6 +151,7 @@ done
 link bin/oneshot-secret "$HOME/.local/bin/oneshot-secret"
 link claude/skills/oneshot-secret "$HOME/.codex/skills/oneshot-secret"
 link claude/skills/queue "$HOME/.codex/skills/queue"
+link claude/skills/machines "$HOME/.codex/skills/machines"
 link hammerspoon/init.lua "$HOME/.hammerspoon/init.lua"
 link hammerspoon/omnibox_tab.lua "$HOME/.hammerspoon/omnibox_tab.lua"
 link hammerspoon/vscode_swipe_nav.lua "$HOME/.hammerspoon/vscode_swipe_nav.lua"

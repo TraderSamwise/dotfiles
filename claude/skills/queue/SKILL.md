@@ -1,6 +1,6 @@
 ---
 name: queue
-description: "Sam's request queue — capture, state and proof. Use ONLY when Sam says 'queue up' (or any misspelling: queue this, queu up, que up, add to the queue), when something is an obvious follow-up to an already-queued item, when he asks what is in his queue / what is left / what is outstanding, or before claiming anything is done. Do NOT queue things he did not ask you to queue."
+description: "Sam's request queue — capture and three states. Use ONLY when Sam says 'queue up' (or any misspelling: queue this, queu up, que up, add to the queue), when something is an obvious follow-up to an already-queued item, when he asks what is in his queue / what is left / what is outstanding, when he asks for this agent's own report ('/queue mine', 'what's next for you', 'what are we working on', 'what shipped', 'what landed', 'what's in flight', 'status'), or before claiming anything is done. Do NOT queue things he did not ask you to queue."
 user-invocable: true
 ---
 
@@ -10,8 +10,8 @@ user-invocable: true
 
 Sam's asks arrive mid-task, as a screenshot and half a sentence, and they arrive
 faster than they are finished. A queue kept in a chat message is gone at the next
-compaction and cannot be checked. This one is on disk, its history is
-append-only, and the transition that matters refuses to run without evidence.
+compaction and cannot be checked. This one is on disk and its history is
+append-only, so what was asked for survives being forgotten.
 
 ## Capture — only on these two triggers
 
@@ -59,102 +59,123 @@ you are going to act on it in this exchange, it does not need the queue.**
 
 An interactive session that reaches for `queue` on every turn has misread this.
 
-## The lifecycle, and what each state actually claims
+## The lifecycle
 
 ```
 todo ─► doing ─► done
-  └───────┴─────► blocked / wontdo ─► dropped
+  └──────────────┘
 ```
 
-**Three states, and Sam named them on 2026-09-04:** *"todo, doing, done. thats
-it. and doing is when actively coding it or if we have to push debug logs or if
-there is a real need for verification. otherwise done is done."*
+**Three states and nothing else.** Sam named them on 2026-09-04 — _"todo, doing,
+done. thats it."_ — and said it again on 2026-10-17 when `blocked`, `wontdo` and
+`dropped` were removed from the tool: _"only 3 states."_
 
-So `doing` is not a holding pen. It means hands are on it — writing the code,
-debug logging out in the wild, or something that genuinely cannot be settled
-yet. **Never park an item in `doing` to wait for a release.** He also said:
-*"queue tasks should not wait on deployment UNLESS there is uncertainty of the
+`doing` is not a holding pen. It means hands are on it — writing the code, debug
+logging out in the wild. **Never park an item in `doing` to wait for a release.**
+_"queue tasks should not wait on deployment UNLESS there is uncertainty of the
 fix to a high degree. queueing is to just get shit done. ill requeue additional
-fixes if needed."* And: *"queue system is not a ticket system."*
+fixes if needed."_ And: _"queue system is not a ticket system."_
 
-`blocked`, `wontdo` and `dropped` are EXITS, not steps in that flow — waiting on
-Sam, proposing to abandon, and his ruling. They are why the diagram has a second
-line.
+Waiting on Sam is still `todo`. There is no state for it, because a state whose
+only job is to say "stuck" is a state nobody reads — say it to him instead.
 
-There were three states after `doing` — `landed` for a commit, `shipped` for
-something a person could reach, `verified` for Sam confirming it. He collapsed
-them on 2026-09-03: *"Shipped and landed are the same thing to me. Once it's
-done it's done, move on. I'll report if there is a follow up."*
-
-`wontdo` is a proposal and `dropped` is Sam's ruling — see below. An agent never
-reaches `dropped` on its own.
-
-| state | what it claims | what the tool demands |
-|---|---|---|
-| `todo` | he asked for it | his words |
-| `doing` | hands are on it, or it truly cannot be settled yet | `--by` |
-| `done` | it is written, and something you ran says so | `--commit` **and** `--proof` |
-| `wontdo` | you propose abandoning it | `--why`, and it stays listed |
-| `dropped` | **Sam agreed to abandon it** | Sam only |
+| state   | what it claims        | what the tool demands |
+| ------- | --------------------- | --------------------- |
+| `todo`  | he asked for it       | his words             |
+| `doing` | hands are on it       | `--by`                |
+| `done`  | it is committed       | **nothing**           |
 
 ```bash
-queue start q7 --by claude
-queue done  q7 --commit 3bd219a5 \
-  --proof "grep of live bundle entry-f13f49de: 'How many places?' x1"
-queue block q7 --why "needs the outpainted image, which I cannot generate"
-queue wontdo q7 --why "cannot reproduce; propose abandoning"   # PROPOSAL only
+queue start 947602-130 --by claude
+queue done  947602-130
+queue delete 947602-130            # it will not be done; it leaves the list
 ```
 
-Illegal jumps are refused. Nothing is done that nobody started.
+`todo → done` is legal. If you finished something without marking `doing`, close
+it — do not walk it through a state to satisfy the tool.
 
-## Proof is the whole point
+## Done the second it is done
 
-`--proof` is a thing you **ran** and what it answered. A commit sha is not
-proof — `done` asks for both because a sha alone is exactly the claim that made
-this tool necessary.
+**Committed or merged IS the gate.** 2026-10-17: _"as soon as a feature is merged
+or if done on master as soon as committed it is marked as done. ALWAYS. no 'test
+it and ill mark as done' no 'human confirmation' if the feature has been
+committed it is done."_
 
-**Take whatever actually settles the question, and do not wait for a deploy to
-get it.** For most code that is a gate you PROVE-FAILED: broke the assertion,
-watched it fail, restored it, watched it pass. That is a stronger claim than a
-deploy, because it says what would catch the regression.
+So `queue done <id>` takes no arguments and runs the moment the commit lands. Not
+after CI, not after a deploy, not after Sam looks at it.
 
-Reach for the running product only when nothing else can settle it — something
-rendered, something deploy-dependent, a row in a database:
+`--commit` and `--proof` still exist and are still recorded if you pass them.
+They are not conditions, and **you do not hold an item open to assemble them**.
+Requiring proof is what taught agents to sit on `doing` collecting evidence
+instead of closing work and moving to the next thing — _"done requires nothing
+holy fuck. done should be the first thing you do the second you are done."_
 
-- a gate or test you prove-failed, named, with its count
-- a grep of the **deployed** bundle for a string only that change introduces
-- a live API response
-- a DB row you selected
-- a screenshot you actually looked at
+What has not changed: do not SAY something is done without the transition behind
+it, and do not report a thing as finished that is not committed. The tool stopped
+checking; the honesty did not become optional.
 
-On 2026-08-26 a page reorder was reported done when only the inner panel had
-moved, and a capacity field was reported as existing when it was two clicks deep
-on another tab. Both claims came from a commit rather than from the running
-product. That is the failure this contract exists to make impossible.
+## Work that will not be done gets deleted
 
-**Then move on.** Do not hold work open waiting for Sam to confirm it, and do
-not end a report with a list of things awaiting his blessing — that is the noise
-he removed the states for. He will say if there is a follow-up, and a follow-up
-is `queue requeue` or a new item, not a state you were keeping warm.
-
-## Abandoning something is not yours to decide
-
-`drop` is **Sam's**. It is the only thing that takes an ask off the list for
-good, and an agent reaching for it is an agent making an inconvenient request
-disappear — the exact failure this tool exists to prevent.
-
-When you think something should not be done, propose it:
+2026-10-17: _"if something is 'wont do' delete it."_
 
 ```bash
-queue wontdo q7 --why "cannot reproduce without knowing which artifact he meant"
+queue delete 947602-130 --why "cannot reproduce"   # --why is optional, and logged
 ```
 
-`wontdo` **stays on the list** with a `?` until Sam rules on it, and he rules by
-running `queue drop q7 --why "..."` or `queue requeue q7`. Say out loud that you
-have proposed it; do not let a `?` sit there silently hoping he never asks.
+There is no `wontdo` proposal and no `dropped` ruling any more. If it should not
+be done, remove it and say so in your reply. The log is append-only, so a delete
+is a tombstone — `queue show` can still account for the id, every view drops it.
 
-`wontdo` → `dropped` is now the only pair of its kind left: you get it to the
-edge, Sam makes the call. Nothing an agent runs removes an ask from view.
+## Check an item is real before you work it
+
+An item in the queue is not automatically an ask from Sam. Agents write items
+too — splitting a clause off a bigger one, recording something they found — and
+those read exactly like his words, especially when they quote him.
+
+Before starting anything you did not just take from him:
+
+```bash
+queue show 947602-126      # who added it, and its whole history
+```
+
+- **If an agent added it, the premise is a claim, not an instruction.** Check it
+  still holds. If it quotes Sam from another item, read that item too — its
+  state and its notes.
+- **A `doing` item inherited from a previous session is the most suspect thing
+  in the queue.** Nobody's hands are on it, somebody left it mid-flight, and the
+  reason may already be gone.
+- **If it is already done, close it** and say so. If it should not be done,
+  `queue delete` it and say so.
+
+On 2026-10-17 an agent inherited a `doing` item, spent a day on it across three
+merged PRs, and the work had shipped three weeks earlier under a different item
+that was already `done`. The design had been settled and written down in a note
+on the parent item. One `queue show` on the parent would have ended it.
+
+## Order: newest first
+
+**`queue next` takes the NEWEST unclaimed item**, not the oldest. 2026-10-17:
+_"working through the queue autonomously should ALWAYS be in most recent to
+oldest order. assume the most recently added things are the things i care about
+the most."_
+
+Usually he names the work. Newest-first is what "do the queue" means when he
+does not.
+
+## The backlog: a todo that has sat 7 days
+
+A `todo` nobody has touched for seven days leaves the working list. It is not a
+state and nothing moves it — `ls` and `next` derive it and skip it, so you
+**cannot** pick one up by accident.
+
+```bash
+queue backlog                      # only the shelved ones
+queue backlog --mine --project     # same filters as ls
+```
+
+**Leave the backlog alone unless Sam asks.** It exists so the two of you can
+clean it out together; it is not a source of work to pick from. Never work a
+backlog item on your own initiative, and do not propose one as "what's next".
 
 ## Reporting
 
@@ -162,11 +183,73 @@ When Sam asks what is left, run `queue ls` and report **that**, not your memory
 of it. Never answer "what's in my queue" from context.
 
 ```bash
-queue ls                  # outstanding in this repo
-queue ls --all            # every repo
-queue ls --state blocked
-queue show q7             # one item, all its history
+queue ls                  # the working list here, newest first
+queue ls --project        # every worktree of this project
+queue backlog             # the 7-day-old todos, only when he asks
+queue show 947602-130     # one item, all its history
 ```
+
+## `/queue mine [window] [all]` — what landed and what is in flight
+
+Answer Sam's "what are we on and what shipped" in one tight report. Do not drift
+into unrelated code or inventory agents he is not asking about.
+
+**Args**, any order; if ambiguous, pick the most specific reading and proceed:
+
+1. **Window** — `30m`, `2h`, `1d`, or `last 6 hours`, `since yesterday`, `today`.
+   Default **24h**.
+2. **Scope** — `all` / `everything` / `project-wide` / `fleet` means every agent
+   and every master commit. Default **self**: this agent's own work.
+
+**Self** is this agent's work in the window:
+
+- **Commits** — `git log --since=<window>` on master and on my branch, by my
+  author handle, else by my branch.
+- **PRs** — open and merged PRs whose `headRefName` is my branch or one I cut.
+- **Queue** — `queue ls --mine`: open items ONLY (`doing`, then `todo`, newest
+  first), whatever their age. A `done` item never goes in QUEUE — its commit is
+  already in LANDED, and listing it there reads as still outstanding.
+- **Branch state** — current branch, ahead/behind master, uncommitted files,
+  unpushed commits.
+- **Open thread** with whoever dispatched me, if any (`aimux thread list`).
+
+**If I am an overseer** — this session has `aimux message send --from <me>` to
+several agents — self also covers the agents I dispatched: their branches, PRs
+and in-flight work in the window. Otherwise it is just my own branch and queue.
+
+**Collect**, in parallel, keeping calls tight:
+
+- `git fetch` first, then `git log --since=<window> --pretty=format:'%h %ai %s' origin/master`.
+- `gh pr list --state merged --search "merged:>=<ISO>" --json number,title,mergeCommit,author --limit 50`.
+- `gh pr list --state open --json number,title,headRefName,author,updatedAt --limit 50`.
+- `aimux list --json` — status of each agent, and which entry is me.
+- The repo's deployed-version check, if its docs name one; with `all`, also
+  how far the release lane is behind master (`git rev-list --count`).
+
+With `all`: every master commit grouped by author, every open PR with its owner
+inferred from branch or author, every active agent.
+
+**Report** — these sections, one line per item, `none` for an empty one:
+
+```
+LANDED (<N> in last <window>)
+- PR #<n> <title> — <merge sha> — <owner if known>
+
+IN FLIGHT
+- <agent> on <branch>: <one-line status> — <PR if open>
+
+QUEUE (<N> open)
+- <id> <doing|todo> <one line>
+next: <id>
+```
+
+With `all`, add `MASTER COMMITS (not in the merged-PR list)`. End with one line
+on the deployed lane vs master, when the repo has one. Under ~20 lines unless
+`all` over a long window.
+
+**Leave out** agent chatter and "quiet, nothing new" lines, idle agents,
+history of how the work got here, blockers unless one exists right now, and any
+deploy detail beyond that one line (that is `/triage`).
 
 ## Where it lives
 

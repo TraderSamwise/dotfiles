@@ -1,6 +1,6 @@
 ---
 name: machines
-description: Sam's machines and how to bring any of them to parity - provisioning, agent config, model defaults, and drift. Use when Sam asks to set up, update, check, or fix one of his machines (sam-mbp, sam-mbp2, sam-mini, sam-strix, or a new one), when something works on one machine but not another, when he asks what model his agents are on or wants to change it, or when a new machine needs the whole stack. Triggers on "provision", "set up my <machine>", "fix it everywhere", "what are my machines on", "bring X up to date", "change the model everywhere".
+description: Provision and maintain Sam's machines, including agent tools, model defaults, Claude GPT routing, and configuration drift. Use when asked to set up, update, inspect, or fix a machine, bring machines to parity, or change agent models across them.
 ---
 
 # Sam's machines
@@ -24,7 +24,7 @@ there. Reach each by its ssh alias; all are on Tailscale.
 
 ## What "provisioned" means
 
-Four layers. Check each; most problems are one layer missing on one machine.
+Five layers. Check each; most problems are one layer missing on one machine.
 
 1. **Public half** - `~/cs/dotfiles` cloned from `github.com/TraderSamwise/dotfiles`,
    then `bootstrap.sh --no-brew --no-vscode` (drop the flags only when he wants
@@ -41,6 +41,44 @@ Four layers. Check each; most problems are one layer missing on one machine.
    `agents/defaults.json`. `--check` reports without writing. Run it per machine.
 4. **Machine-local secrets** - `~/.zshrc.local`, `~/.zshenv.local`, `~/.ssh`,
    `~/cs/docs/agent-memory`. Never in a repo, never copied blindly.
+5. **Claude GPT mode** - the `claude` shim must execute native Claude directly
+   by default and route only `--gpt` to the machine-local proxy. Read the section
+   below; this is part of normal agent-machine provisioning, including Linux.
+
+## Claude GPT mode
+
+`agents/defaults.json` → `claude_gpt` declares the GPT model, small model,
+context threshold, proxy release and local port. `bin/claude-router` reads it
+directly. Keep native Claude defaults separate; never set the proxy URL globally.
+The detailed runbook is `~/cs/docs/claude-code-openai-proxy.md`, reached from
+dev-env-setup Phase 9d. Use the target machine's actual home directory.
+
+- Inspect the existing shim, helper, proxy version, listener ownership, Codex
+  login availability, service state and active requests before changing them.
+  Preserve active work; install service files separately from starting them.
+- Bootstrap supplies `~/.local/bin/claude-router`, the Claude shim from
+  `volta/claude`, and this skill to both Claude and Codex. On an existing machine,
+  link/copy only missing or changed files when a full bootstrap would affect
+  unrelated settings. Keep the declaration with the helper.
+- Install the declared `fcakyon/claude-code-with-codex` release with its official
+  version-pinned installer and verify its published checksum. Reuse that host's
+  Codex login; if absent, run `codex login` there. Do not copy another host's
+  credential file. Proxy updates are deliberate and separate from TUI updates.
+- Run `claude-router install`, then `claude-router start` when its port is free.
+  macOS uses a per-user LaunchAgent at login. Linux uses a systemd user service;
+  check `loginctl show-user "$(id -u)" -p Linger` and enable lingering for a
+  headless always-on host if needed. Never kill an unknown listener.
+- On a Mac with SketchyBar, install the GPT health item from the private dev
+  docs config, preserving unrelated bar changes. Clicking restarts the service;
+  green means local health, amber means restarting, red means unavailable or a
+  failed restart. Linux has no SketchyBar requirement.
+- Verify native `claude --version`, declared proxy version, managed listener,
+  health, restart/PID change when idle, and a real `claude --gpt -p` response.
+  Run the scoped router tests to cover native argument forwarding and Aimux
+  hook/settings preservation. Confirm global Claude settings stayed native.
+  Report the per-host result; an auth failure is not a successful GPT setup.
+  Give CLI probes inside an SSH shell script `</dev/null` so Claude does not
+  consume the remaining script as prompt input.
 
 ## Models
 

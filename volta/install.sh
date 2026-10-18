@@ -3,7 +3,8 @@
 # ~/.local/volta-shims — the only Volta binaries zsh/zshenv puts on PATH. Idempotent.
 set -euo pipefail
 
-TOOLS="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/tools.txt}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TOOLS="${1:-$HERE/tools.txt}"
 export VOLTA_HOME="${VOLTA_HOME:-$HOME/.volta}"
 SHIMS="$HOME/.local/volta-shims"
 
@@ -65,7 +66,11 @@ fi
 mkdir -p "$SHIMS"
 for s in ${shim_names[@]+"${shim_names[@]}"}; do
   f="$SHIMS/$s"
-  printf '#!/bin/sh\nexec "$HOME/.volta/bin/%s" "$@"\n' "$s" >"$f.tmp"
+  if [ "$s" = claude ]; then
+    cp "$HERE/claude" "$f.tmp"
+  else
+    printf '#!/bin/sh\nexec "$HOME/.volta/bin/%s" "$@"\n' "$s" >"$f.tmp"
+  fi
   if [ -f "$f" ] && cmp -s "$f" "$f.tmp"; then
     rm -f "$f.tmp"
     echo "ok     shim $s"
