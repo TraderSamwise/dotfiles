@@ -72,16 +72,27 @@ def replace_managed_block(config: str, block: str) -> str:
     matches = list(STALE_BLOCK_RE.finditer(config))
     if len(begins) != len(ends) or len(begins) > 1 or len(matches) != len(begins):
         raise ValueError("Codex config has duplicate or incomplete managed instruction markers.")
-    outside = STALE_BLOCK_RE.sub("", config)
+    remainder = ""
+    if matches:
+        managed = matches[0]
+        body = managed.group(0).split("\n", 1)[1].rsplit("# END managed:", 1)[0]
+        assignments = re.findall(r"^developer_instructions\s*=", body, re.M)
+        instruction = re.search(
+            r'^developer_instructions[ \t]*=[ \t]*"""(?:\\.|"(?!"")|[^"\\])*"""[ \t]*\n?',
+            body,
+            re.M | re.S,
+        )
+        if len(assignments) != 1 or instruction is None:
+            raise ValueError("Managed instructions must contain one multiline instruction assignment.")
+        remainder = body[:instruction.start()] + body[instruction.end():]
+    outside = STALE_BLOCK_RE.sub(lambda _: remainder, config)
     if re.search(r"^developer_instructions\s*=", outside, re.M):
         raise ValueError("Codex config has unmanaged developer_instructions; refusing to overwrite them.")
-    if START in config and END in config:
-        before, rest = config.split(START, 1)
-        _, after = rest.split(END, 1)
+    if matches:
+        before = config[:managed.start()]
+        after = remainder + config[managed.end():]
         prefix = before.rstrip()
         return (prefix + "\n\n" if prefix else "") + block + "\n\n" + after.lstrip()
-    # Strip any stale block referencing a different machine's HOME.
-    config = STALE_BLOCK_RE.sub("", config)
     return block + "\n\n" + config.lstrip()
 
 

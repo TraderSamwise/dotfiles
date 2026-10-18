@@ -94,6 +94,24 @@ class SyncInstructionsTest(unittest.TestCase):
         self.assertEqual(config.count("developer_instructions ="), 1)
         self.assertEqual(self.run_sync("--check").returncode, 0)
 
+    def test_runtime_settings_inside_managed_markers_are_preserved(self):
+        self.assertEqual(self.run_sync().returncode, 0)
+        working = self.target.read_text().replace('model = "example-model"\n', '')
+        for home in [str(self.home), "/other/home"]:
+            with self.subTest(home=home):
+                config = working.replace(str(self.home), home)
+                end = f"# END managed: {home}/CLAUDE.md -> Codex developer_instructions"
+                settings = 'model = "selected-model"\nmodel_reasoning_effort = "high"\n'
+                config = config.replace(end, settings + end)
+                config += '[projects."/workspace"]\ntrust_level = "trusted"\n'
+                self.target.write_text(config)
+                self.assertEqual(self.run_sync().returncode, 0)
+                synced = self.target.read_text()
+                self.assertIn(settings, synced)
+                self.assertLess(synced.index("# END managed:"), synced.index('model = "selected-model"'))
+                self.assertLess(synced.index(settings), synced.index('[projects.'))
+                self.assertEqual(self.run_sync("--check").returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
