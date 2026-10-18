@@ -94,12 +94,6 @@ def replace_managed_block(config: str, block: str) -> str:
     if matches:
         before = config[:managed.start()]
         after = remainder + config[managed.end():]
-        # A `[table]` header above the block would make the key a member of
-        # that table, so Codex reads no instructions at all. Keeping the old
-        # position was sticky: once a server was prepended, every later sync
-        # rewrote it in place and `--check` reported a match.
-        if TABLE_HEADER_RE.search(before):
-            return assert_top_level(block + "\n\n" + (before.strip() + "\n\n" + after.lstrip()).lstrip())
         prefix = before.rstrip()
         return assert_top_level((prefix + "\n\n" if prefix else "") + block + "\n\n" + after.lstrip())
     return assert_top_level(block + "\n\n" + config.lstrip())
@@ -109,17 +103,26 @@ def assert_top_level(config: str) -> str:
     """
     `developer_instructions` must be a top-level key, not a table member.
 
-    Comparing text alone let the gate pass while Codex saw nothing, so the
-    placement is checked rather than assumed.
+    Comparing text alone let the gate pass while Codex saw nothing. Repairing
+    it automatically is worse: once a `[table]` is prepended, the root keys
+    below it are syntactically members of that table, and nothing in the file
+    says which the user meant -- two attempts at hoisting swept `model`,
+    `approval_policy`, `sandbox_mode` and forty more into an mcp server. So
+    this refuses and names the table instead of guessing.
     """
     position = config.find(START)
     if position < 0:
         raise ValueError("Generated Codex config lost its managed instruction markers.")
-    header = TABLE_HEADER_RE.search(config[:position])
+    header = next(
+        (match for match in TABLE_HEADER_RE.finditer(config) if match.start() < position), None
+    )
     if header:
+        line = config[: header.start()].count("\n") + 1
         raise ValueError(
-            "Codex developer_instructions would belong to "
-            f"{header.group(0).strip()} instead of the document root."
+            "Codex developer_instructions would belong to the table opened at "
+            f"line {line} instead of the document root. Move the managed block "
+            "above every [table] header in the config by hand; relocating it "
+            "here cannot tell your root keys from that table's members."
         )
     return config
 

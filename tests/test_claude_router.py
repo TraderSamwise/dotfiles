@@ -78,16 +78,83 @@ class ClaudeRouterTests(unittest.TestCase):
             control.assert_called_once_with("enable", "--now", router.UNIT_NAME)
 
     def test_start_refuses_a_port_someone_else_already_owns(self):
-        """The inverse of the port check: an occupied port must stop the start."""
+        """
+        A real listener, because patching `router.socket` wholesale could not
+        see WHICH port was probed: pointing the check at `PORT + 1` or at
+        `0.0.0.0:1` still passed.
+        """
+        import socket as sockets
+        listener = sockets.socket()
+        self.addCleanup(listener.close)
+        listener.setsockopt(sockets.SOL_SOCKET, sockets.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        occupied = listener.getsockname()[1]
         with patch.object(router, "LINUX", True), patch.object(router, "UNIT") as unit, \
-                patch.object(router, "loaded", return_value=False), patch.object(router, "socket") as sockets, \
+                patch.object(router, "PORT", occupied), \
+                patch.object(router, "loaded", return_value=False), \
                 patch.object(router, "systemctl") as control, patch.object(router, "wait_healthy"):
             unit.is_file.return_value = True
-            sockets.socket.return_value.__enter__.return_value.connect_ex.return_value = 0
             with self.assertRaises(RuntimeError) as refusal:
                 router.start()
-            self.assertIn(str(router.PORT), str(refusal.exception))
+            self.assertIn(str(occupied), str(refusal.exception))
             control.assert_not_called()
+
+        free = sockets.socket()
+        free.bind(("127.0.0.1", 0))
+        spare = free.getsockname()[1]
+        free.close()
+        with patch.object(router, "LINUX", True), patch.object(router, "UNIT") as unit, \
+                patch.object(router, "PORT", spare), \
+                patch.object(router, "loaded", return_value=False), \
+                patch.object(router, "systemctl") as control, patch.object(router, "wait_healthy"):
+            unit.is_file.return_value = True
+            router.start()
+            control.assert_called_once_with("enable", "--now", router.UNIT_NAME)
+
+    def test_a_prompt_that_spells_the_flag_does_not_route_or_lose_itself(self):
+        """
+        `claude -p "--gpt"` routed a session the user never asked to route and
+        then dropped the prompt. The shim and the router must agree on where
+        the prompt begins.
+        """
+        self.assertIsNone(router.gpt_flag_index(["-p", "--gpt"]))
+        self.assertIsNone(router.gpt_flag_index(["--print", "--gpt"]))
+        self.assertIsNone(router.gpt_flag_index(["--", "--gpt"]))
+        self.assertEqual(router.gpt_flag_index(["--gpt", "-p", "--gpt"]), 0)
+        self.assertEqual(router.gpt_flag_index(["--settings", "x", "--gpt"]), 2)
+        kept = router.prepare_gpt(["--gpt", "-p", "--gpt"])
+        self.assertEqual(kept[-2:], ["-p", "--gpt"], "the prompt must survive")
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / ".local/bin/claude-router"
+            helper.parent.mkdir(parents=True)
+            helper.write_text('import json,sys\nprint(json.dumps(sys.argv[1:]))\n')
+            native = Path(directory) / ".volta/bin/claude"
+            native.parent.mkdir(parents=True)
+            native.write_text('#!/bin/sh\nprintf "native"\n')
+            native.chmod(0o755)
+            result = subprocess.run([str(ROOT / "volta/claude"), "-p", "--gpt"],
+                                    env={"HOME": directory}, capture_output=True, text=True)
+            self.assertEqual(result.stdout, "native", "the shim must not route on prompt text")
+
+    def test_settings_land_in_one_private_file_not_a_temp_directory(self):
+        """
+        The first fix wrote a fresh `delete=False` temp file per launch and then
+        `execve`d away, so 128 of them piled up in `$TMPDIR` holding tokens.
+        """
+        import stat
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(router, "STATE", Path(directory) / "state"):
+                first = router.write_private_settings({"env": {"TOKEN": "one"}})
+                second = router.write_private_settings({"env": {"TOKEN": "two"}})
+            self.assertEqual(first, second, "each launch must reuse one path")
+            self.assertEqual(json.load(open(second))["env"]["TOKEN"], "two")
+            self.assertEqual(stat.S_IMODE(os.stat(second).st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(os.stat(Path(second).parent).st_mode), 0o700)
+            self.assertTrue(
+                second.startswith(str(Path(directory) / "state")),
+                f"settings must live under STATE, not {second}",
+            )
 
     def status_exit(self, *, version, loaded_job, problem):
         """`status` returning 1 unconditionally passed every earlier test."""

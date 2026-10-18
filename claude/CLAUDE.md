@@ -1,9 +1,8 @@
 # Shared Agent Instructions
 
-Portable policy, shared through public dotfiles. **This file is public, so it
-must never hold private details: no hosts, IPs, tokens, company repos or
-personal paths.** Private identities, infrastructure, credentials, and personal
-knowledge belong in `~/CLAUDE.md` or the private documents it references.
+Portable policy, shared through public dotfiles. Private identities,
+infrastructure, credentials, and personal knowledge belong in `~/CLAUDE.md`
+or the private documents it references.
 
 <!-- codex:sync-start -->
 
@@ -11,6 +10,7 @@ knowledge belong in `~/CLAUDE.md` or the private documents it references.
 
 - Before changing files, read the nearest parent `CLAUDE.md` and runtime-standard instruction files, even when they belong to another agent runtime.
 - For agent-process questions, read `~/.claude/CLAUDE.md` and `~/CLAUDE.md` before looking for commands.
+- **This file is public, so it must never hold private details: no hosts, IPs, tokens, company repos or personal paths.** Those go in `~/CLAUDE.md`.
 - Keep each rule in one place: portable policy here, private operational facts in `~/CLAUDE.md`, procedures in skills/runbooks. Memory indices contain only a topic, read trigger, and filename. Current instructions override conflicting historical memories.
 - When changing a rule, reconcile both global sources and remove obsolete summaries. Only `codex:sync` regions reach Codex; after editing either source, run `~/.local/bin/sync-codex-claude`, then `~/.local/bin/sync-codex-claude --check`. Never edit generated `developer_instructions` directly.
 - Before infrastructure, deploy, release, install, update, or publish work, read the repo's release/deployment docs and package scripts. Run an exact command supplied by the user or explain why it cannot run before substituting.
@@ -74,7 +74,7 @@ knowledge belong in `~/CLAUDE.md` or the private documents it references.
 
 - "One at a time", "one by one", or "next one" means a gated flow: decide branch/worktree need, reproduce, agree on diagnosis/fix, implement, then push/mark complete together. Do not batch without explicit authorization.
 - "Full auto", "plan-execute", "just go", or "batch them" means continue through every phase and commit. Stop early only for an external blocker requiring the user, repeated genuine failure after honest retries, or an instruction to stop/context-switch.
-- Mid-run, the most you say is one line naming the phase and the next step, followed immediately by the next tool call; there is no such thing as a good point to report. No status table, no Done/Left, no closing paragraph that asks whether to carry on. Report when the last phase is committed. Never stop or truncate work because context is filling; automatic compaction handles it. Do not announce context usage or suggest a fresh session. Preserve plan, decisions, paths, and teammate state across compaction.
+- Mid-run, the most you say is one line naming the phase and the next step, followed immediately by the next tool call; there is no such thing as a good point to report. No status table, no Done/Left, no closing paragraph that asks whether to carry on. Report once the last phase is committed, as two headed lists: what is finished with the identifier that proves it, and what is not, including failures and skipped gates. Never stop or truncate work because context is filling; automatic compaction handles it. Do not announce context usage or suggest a fresh session. Preserve plan, decisions, paths, and teammate state across compaction.
 - "Context switch" means stop the current task immediately and wait for the next instruction.
 - Raise a concern once; after the user decides, proceed without re-arguing it. Use real domain terms consistently in labels and descriptions.
 - Report only actions actually taken and states checked in this turn. Distinguish committed, pushed, merged, built, released, and live. Omit adjacent findings, recaps, promises, and generic disclaimers; report specific failures or limitations that change the user's next action.

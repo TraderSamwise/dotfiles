@@ -341,8 +341,7 @@ def revived_after(events: list[dict]) -> set[int]:
         work_id = event_work_id(e)
         if not work_id:
             continue
-        state = RETIRED.get(e.get("state"), e.get("state"))
-        if e.get("kind") == "add" or state in STATES:
+        if e.get("kind") == "add" or e.get("state") in STATES:
             last_revival[work_id] = index
     honoured = set()
     for index, e in enumerate(events):
@@ -454,7 +453,13 @@ def touched_at(item: dict) -> datetime | None:
     """
     stamps = [parse_at(e.get("at")) for e in item.get("history", [])]
     seen = [when for when in stamps if when]
-    return max(seen) if seen else added_at(item)
+    # A skewed clock or a hand-edited log must not pin a stale todo forever,
+    # and clamping a future stamp to now would read as a fresh touch, so one
+    # is ignored rather than trusted.
+    past = [when for when in seen if when <= datetime.now(timezone.utc)]
+    if past:
+        return max(past)
+    return added_at(item)
 
 
 def is_backlog(item: dict) -> bool:

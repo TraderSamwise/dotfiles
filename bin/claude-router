@@ -8,7 +8,6 @@ import re
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -54,32 +53,50 @@ def health():
     return None
 
 
+PROMPT_FLAGS = ("-p", "--print", "--prompt")
+
+
+def prompt_boundary(args: list[str]) -> int:
+    """Where flags stop and the user's text begins."""
+    for index, arg in enumerate(args):
+        if arg == "--" or arg in PROMPT_FLAGS:
+            return index
+    return len(args)
+
+
 def gpt_flag_index(args: list[str]) -> int | None:
     """
-    The FIRST bare `--gpt` only.
+    `--gpt` is a flag only before the prompt begins.
 
-    Filtering every occurrence ate the prompt in `claude --gpt -p "--gpt"`,
-    leaving `-p` dangling so Claude blocked on stdin. One flag was passed, so
-    one is removed; a later one is the user's text.
+    `volta/claude` matched it anywhere, so `claude -p "--gpt"` routed a session
+    the user never asked to route and then lost the prompt. Past `--` or a
+    prompt flag, text is text. Scanning stops there in the shim too, and the
+    two must agree.
     """
-    return args.index("--gpt") if "--gpt" in args else None
+    head = args[:prompt_boundary(args)]
+    return head.index("--gpt") if "--gpt" in head else None
 
 
 def write_private_settings(settings: dict) -> str:
     """
-    Merged settings go to a 0600 file, never into argv.
+    Merged settings go to ONE private file, never into argv and never to $TMPDIR.
 
-    A `--settings` file is already 0600 because it can carry tokens. Inlining
-    its JSON put those tokens in the command line, where every other agent on
-    this machine can read them out of `ps`.
+    Inlining the JSON put tokens in the command line, where `ps` shows them to
+    every user on the machine. The first attempt at a fix wrote a fresh
+    `delete=False` temp file per launch and then `execve`d away, so nothing
+    ever removed them: 128 of them accumulated in `$TMPDIR`, two still holding
+    a token. A single path under a 0700 directory is rewritten in place
+    instead, so one launch's settings replace the last one's.
     """
-    handle = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", prefix="claude-gpt-settings-", delete=False
-    )
-    with handle:
+    directory = STATE / "gpt"
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    path = directory / "settings.json"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w") as handle:
         os.fchmod(handle.fileno(), 0o600)
         json.dump(settings, handle, separators=(",", ":"))
-    return handle.name
+    return str(path)
 
 
 def prepare_gpt(args):
@@ -89,7 +106,7 @@ def prepare_gpt(args):
     if flag is not None:
         del options[flag]
     tail = args[end:]
-    settings_index = next((i for i, arg in enumerate(options)
+    settings_index = next((i for i, arg in enumerate(options[:prompt_boundary(options)])
                            if arg == "--settings" or arg.startswith("--settings=")), None)
     settings = {}
     if settings_index is not None:

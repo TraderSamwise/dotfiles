@@ -47,22 +47,42 @@ class SyncInstructionsTest(unittest.TestCase):
         self.assertNotEqual(self.run_sync("--check").returncode, 0)
         self.assertEqual(self.target.read_bytes(), synced)
 
-    def test_a_table_prepended_above_the_block_does_not_capture_the_key(self):
+    def test_a_table_prepended_above_the_block_is_refused_not_repaired(self):
         """
         A `[table]` header above the managed block makes
         `developer_instructions` a member of that table, so Codex reads no
-        instructions -- and keeping the old position was sticky, so every later
-        sync rewrote it in place and `--check` reported a match.
+        instructions -- and `--check` compared text while never checking
+        placement, so it printed "match". Repairing it automatically swept the
+        root keys below the header into that table, twice, so this refuses and
+        names the line instead.
         """
+        self.target.write_text(
+            'model = "example-model"\nsandbox_mode = "danger"\n\n[mcp_servers.foo]\ncommand = "x"\n'
+        )
         self.assertEqual(self.run_sync().returncode, 0)
-        self.target.write_text('[mcp_servers.bar]\ncommand = "y"\n' + self.target.read_text())
-        self.assertEqual(self.run_sync().returncode, 0, "a mispositioned block must be repaired")
-        config = self.target.read_text()
-        head = config[: config.index("# BEGIN managed:")]
-        self.assertNotRegex(head, r"(?m)^\[", f"a table header still precedes the block:\n{head}")
-        self.assertIn('[mcp_servers.bar]', config, "the prepended server must survive")
-        self.assertEqual(config.count("developer_instructions ="), 1)
+        synced = self.target.read_text()
+        self.assertLess(synced.index("developer_instructions"), synced.index("[mcp_servers.foo]"))
         self.assertEqual(self.run_sync("--check").returncode, 0)
+
+        self.target.write_text('[mcp_servers.bar]\ncommand = "y"\n' + synced)
+        captured = self.target.read_bytes()
+        failed = self.run_sync()
+        self.assertNotEqual(failed.returncode, 0, "a captured key must fail the sync")
+        self.assertIn("instead of the document root", failed.stderr)
+        self.assertEqual(self.target.read_bytes(), captured, "a refusal must not write")
+        checked = self.run_sync("--check")
+        self.assertNotEqual(checked.returncode, 0, "--check must not report a match")
+
+    def test_root_keys_below_the_block_survive_an_ordinary_sync(self):
+        """Two repair attempts swallowed these into a prepended mcp server."""
+        self.target.write_text(
+            'model = "example-model"\napproval_policy = "never"\n\n[mcp_servers.foo]\ncommand = "x"\n'
+        )
+        self.assertEqual(self.run_sync().returncode, 0)
+        config = self.target.read_text()
+        head = config[: config.index("[mcp_servers.foo]")]
+        for key in ("model", "approval_policy", "developer_instructions"):
+            self.assertRegex(head, rf"(?m)^{key}\s*=", f"{key} left the document root")
 
     def test_sync_preserves_config_order_and_runtime_boundaries(self):
         self.assertEqual(self.run_sync().returncode, 0)

@@ -222,6 +222,39 @@ class QueueCase(unittest.TestCase):
         self.assertNotIn("sam-1", result.stdout, "next must not even name a backlog item")
         self.assertIn("1 in the backlog", result.stdout)
 
+    def test_a_future_timestamp_cannot_pin_a_stale_todo_on_the_list(self):
+        """`touched_at` took max() over history, so one skewed `at` won forever."""
+        from datetime import timedelta
+
+        added = self._old_todo("sam-1", 400)
+        ahead = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(timespec="seconds")
+        self.write_events([added, {**added, "kind": "note", "at": ahead, "note": "skewed"}])
+
+        self.assertNotIn("sam-1", self.run_queue("sam", "ls").stdout)
+        self.assertIn("sam-1", self.run_queue("sam", "backlog").stdout)
+
+    def test_a_wontdo_proposal_does_not_undo_a_drop_sam_already_made(self):
+        """`wontdo` maps to todo, so it counted as a revival of a real drop."""
+        added = self._old_todo("sam-8", 2)
+        at = added["at"]
+        self.write_events([
+            added,
+            {**added, "kind": "state", "state": "dropped", "at": at, "why": "sam said no"},
+            {**added, "kind": "state", "state": "wontdo", "at": at, "why": "agent proposal"},
+        ])
+
+        for view in (["ls"], ["ls", "--everything"], ["backlog"]):
+            self.assertNotIn("sam-8", self.run_queue("sam", *view).stdout, view)
+
+    def test_an_item_with_no_usable_timestamp_is_shelved_not_silently_dropped(self):
+        self.write_events([{
+            "id": "sam-7", "workId": "sam-7", "kind": "add", "ask": "no timestamp",
+            "by": "sam", "tree": self.repo.name,
+        }])
+
+        self.assertNotIn("sam-7", self.run_queue("sam", "ls").stdout)
+        self.assertIn("sam-7", self.run_queue("sam", "backlog").stdout)
+
     def test_newest_first_follows_time_not_the_id_counter(self):
         """
         The id counter is per agent, so sorting by its number ranked a stale

@@ -1,7 +1,10 @@
 #!/bin/sh
+# `--gpt` is a flag only before the prompt begins: matching it anywhere routed
+# `claude -p "--gpt"` into GPT and lost the prompt. Mirrors PROMPT_FLAGS and
+# gpt_flag_index in bin/claude-router; the two must agree.
 for arg do
   case "$arg" in
-    --) break ;;
+    -- | -p | --print | --prompt) break ;;
     --gpt) exec /usr/bin/python3 "$HOME/.local/bin/claude-router" gpt "$@" ;;
   esac
 done
