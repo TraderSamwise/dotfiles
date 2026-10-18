@@ -79,7 +79,7 @@ def replace_managed_block(config: str, block: str) -> str:
     if matches:
         managed = matches[0]
         body = managed.group(0).split("\n", 1)[1].rsplit("# END managed:", 1)[0]
-        assignments = re.findall(r"^developer_instructions\s*=", body, re.M)
+        assignments = re.findall(r"^[ \t]*developer_instructions\s*=", body, re.M)
         instruction = re.search(
             r'^developer_instructions[ \t]*=[ \t]*"""(?:\\.|"(?!"")|[^"\\])*"""[ \t]*\n?',
             body,
@@ -102,7 +102,9 @@ def replace_managed_block(config: str, block: str) -> str:
                 "by hand."
             )
     outside = STALE_BLOCK_RE.sub(lambda _: remainder, config)
-    if re.search(r"^developer_instructions\s*=", outside, re.M):
+    # An indented assignment is still a root key to TOML, and missing it
+    # appended a second one, so the emitted file would not parse at all.
+    if re.search(r"^[ \t]*developer_instructions\s*=", outside, re.M):
         raise ValueError("Codex config has unmanaged developer_instructions; refusing to overwrite them.")
     if matches:
         before = config[:managed.start()]

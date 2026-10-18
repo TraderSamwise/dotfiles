@@ -137,6 +137,83 @@ class ClaudeRouterTests(unittest.TestCase):
                                     env={"HOME": directory}, capture_output=True, text=True)
             self.assertEqual(result.stdout, "native", "the shim must not route on prompt text")
 
+    def test_the_shim_and_the_router_agree_on_every_argv(self):
+        """
+        The repo's rule is that the two surfaces must AGREE. They disagreed on
+        `--` landing in a prompt flag's value slot: the shell ate it as the
+        value and routed, Python stopped scanning and did not. The shim then
+        called the router, which passed `--gpt` through to the real binary as
+        an unknown flag.
+        """
+        cases = [
+            ["-p", "hi", "--gpt"], ["-p", "--gpt"], ["--", "--gpt"],
+            ["-p", "--", "--gpt"], ["--print", "--", "--gpt"],
+            ["--prompt", "--", "--gpt"], ["-p", "--", "x", "--gpt"],
+            ["-p"], ["-p", "-p", "--gpt"], ["-p=x", "--gpt"], ["--print=x", "--gpt"],
+            ["-pv", "--gpt"], ["", "--gpt"], ["--settings=", "--gpt"],
+            ["--gpt", "-p", "--gpt"], ["--gpt"],
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / ".local/bin/claude-router"
+            helper.parent.mkdir(parents=True)
+            helper.write_text('print("ROUTED")\n')
+            native = Path(directory) / ".volta/bin/claude"
+            native.parent.mkdir(parents=True)
+            native.write_text('#!/bin/sh\nprintf "NATIVE"\n')
+            native.chmod(0o755)
+            for argv in cases:
+                shell = subprocess.run([str(ROOT / "volta/claude"), *argv],
+                                       env={"HOME": directory}, capture_output=True, text=True)
+                shim_routed = shell.stdout.strip() == "ROUTED"
+                python_routed = router.gpt_flag_index(argv) is not None
+                self.assertEqual(
+                    shim_routed, python_routed,
+                    f"{argv}: shim routed={shim_routed}, router routed={python_routed}",
+                )
+
+    def test_a_failed_launch_writes_no_settings_at_all(self):
+        """
+        Settings were written before `health()`, so a down proxy -- the common
+        failure -- parked a token on disk, and the only sweeper lives inside
+        the write path that never ran.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state"
+            with patch.object(router, "STATE", state), \
+                    patch.object(router, "health", return_value="proxy down"), \
+                    patch.object(router.os, "execve") as execute:
+                with self.assertRaises(RuntimeError):
+                    router.launch_gpt(["--gpt", "--settings", '{"env":{"TOKEN":"sk-LEAKED"}}'])
+                execute.assert_not_called()
+            written = list((state / "gpt").glob("settings-*.json")) if (state / "gpt").exists() else []
+            self.assertEqual(written, [], f"a failed launch left {written}")
+
+    def test_a_symlinked_settings_file_is_refused(self):
+        """`O_NOFOLLOW` guards the leaf; dropping it passed every test."""
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "victim.json"
+            target.write_text("{}")
+            state = Path(directory) / "state"
+            (state / "gpt").mkdir(parents=True)
+            (state / "gpt" / f"settings-{os.getpid()}.json").symlink_to(target)
+            with patch.object(router, "STATE", state):
+                with self.assertRaises(OSError):
+                    router.write_private_settings({"env": {"TOKEN": "no"}})
+            self.assertEqual(target.read_text(), "{}", "the link target must be untouched")
+
+    def test_a_symlinked_settings_directory_is_refused_not_written_through(self):
+        with tempfile.TemporaryDirectory() as directory:
+            elsewhere = Path(directory) / "elsewhere"
+            elsewhere.mkdir(mode=0o755)
+            state = Path(directory) / "state"
+            state.mkdir()
+            (state / "gpt").symlink_to(elsewhere)
+            with patch.object(router, "STATE", state):
+                with self.assertRaises(RuntimeError) as refusal:
+                    router.write_private_settings({"env": {"TOKEN": "no"}})
+            self.assertIn("symlink", str(refusal.exception))
+            self.assertEqual(list(elsewhere.iterdir()), [], "nothing may be written through it")
+
     def test_settings_are_private_per_process_and_swept_by_age(self):
         """
         Three fixes deep. Inlining put tokens in argv; a `delete=False` temp

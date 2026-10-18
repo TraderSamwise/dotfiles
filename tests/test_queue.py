@@ -249,6 +249,24 @@ class QueueCase(unittest.TestCase):
         self.assertIn("sam-6", working)
         self.assertIn("sam-6", self.run_queue("sam", "next").stdout)
 
+    def test_an_undated_item_sorts_last_among_the_shelved(self):
+        """
+        `newest_first`'s `datetime.min` fallback had no coverage. An undated
+        item is always shelved, so the backlog is the only view that can order
+        one against a dated item.
+        """
+        undated = {"id": "sam-4", "workId": "sam-4", "kind": "add", "ask": "no date",
+                   "by": "sam", "tree": self.repo.name}
+        self.write_events([undated, self._old_todo("sam-3", 30)])
+
+        shelved = self.run_queue("sam", "backlog").stdout
+        self.assertIn("sam-3", shelved)
+        self.assertIn("sam-4", shelved)
+        self.assertLess(
+            shelved.index("sam-3"), shelved.index("sam-4"),
+            f"a dated item must outrank an undated one:\n{shelved}",
+        )
+
     def test_a_wontdo_proposal_does_not_undo_a_drop_sam_already_made(self):
         """`wontdo` maps to todo, so it counted as a revival of a real drop."""
         added = self._old_todo("sam-8", 2)

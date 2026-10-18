@@ -103,8 +103,9 @@ def write_private_settings(settings: dict) -> str:
     """
     directory = STATE / "gpt"
     directory.mkdir(parents=True, exist_ok=True)
-    if not directory.is_symlink():
-        os.chmod(directory, 0o700)
+    if directory.is_symlink():
+        raise RuntimeError(f"{directory} is a symlink; refusing to write settings through it.")
+    os.chmod(directory, 0o700)
     sweep_stale_settings(directory)
     path = directory / f"settings-{os.getpid()}.json"
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
@@ -127,12 +128,12 @@ def sweep_stale_settings(directory: Path, keep_seconds: int = 86400) -> None:
     collide, so they are swept by age instead.
     """
     cutoff = time.time() - keep_seconds
-    for stale in directory.glob("settings-*.json"):
+    for stale in sorted(directory.glob("settings-*.json")):
         try:
-            if stale.stat().st_mtime < cutoff:
+            if stale.lstat().st_mtime < cutoff:
                 stale.unlink()
-        except OSError:
-            continue
+        except OSError as error:
+            print(f"warning: could not sweep {stale}: {error}", file=sys.stderr)
 
 
 def prepare_gpt(args):
@@ -174,10 +175,13 @@ def prepare_gpt(args):
 
 
 def launch_gpt(args):
-    prepared = prepare_gpt(args)
+    # Health first: writing settings before this parked a token on disk every
+    # time the proxy was down, which is the common failure, and the only
+    # sweeper runs inside the write path that never got reached.
     problem = health()
     if problem:
         raise RuntimeError(f"GPT proxy unavailable: {problem}. Run: claude-router start")
+    prepared = prepare_gpt(args)
     executable = str(HOME / ".volta/bin/claude")
     os.execve(executable, [executable, *prepared], {**os.environ, **GPT_ENV})
 

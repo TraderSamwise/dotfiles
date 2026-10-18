@@ -96,6 +96,45 @@ class SyncInstructionsTest(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), before, "a refusal must not write")
         self.assertNotEqual(self.run_sync("--check").returncode, 0)
 
+    def test_an_indented_unmanaged_assignment_is_not_overwritten(self):
+        """
+        `^developer_instructions` missed a leading space, so the guard passed
+        and a SECOND root assignment was appended -- the emitted file then did
+        not parse as TOML at all, and Codex lost every setting. Worse than the
+        adoption bug the guard exists to stop.
+        """
+        self.target.write_text('  developer_instructions = "mine"\nmodel = "gpt-5"\n')
+        before = self.target.read_bytes()
+        failed = self.run_sync()
+        self.assertNotEqual(failed.returncode, 0, "an indented assignment must be refused")
+        self.assertIn("unmanaged developer_instructions", failed.stderr)
+        self.assertEqual(self.target.read_bytes(), before, "a refusal must not write")
+
+    def test_every_emitted_config_parses_as_toml_with_its_keys_at_the_root(self):
+        """The guards exist to keep the file parseable; assert that directly."""
+        try:
+            import tomllib
+        except ModuleNotFoundError:
+            try:
+                import tomli as tomllib
+            except ModuleNotFoundError:
+                self.skipTest("no TOML parser available")
+        layouts = [
+            'model = "example-model"\n',
+            'model = "m"\n\n[mcp_servers.foo]\ncommand = "x"\n',
+            '# a comment\nmodel = "m"\napproval_policy = "never"\n',
+            '',
+        ]
+        for layout in layouts:
+            self.target.write_text(layout)
+            self.assertEqual(self.run_sync().returncode, 0, layout)
+            parsed = tomllib.loads(self.target.read_text())
+            self.assertIn("developer_instructions", parsed, layout)
+            self.assertIsInstance(parsed["developer_instructions"], str)
+            if "model" in layout:
+                self.assertEqual(parsed.get("model"), "m" if 'model = "m"' in layout else "example-model")
+            self.assertEqual(self.run_sync("--check").returncode, 0, layout)
+
     def test_root_keys_below_the_block_survive_an_ordinary_sync(self):
         """Two repair attempts swallowed these into a prepended mcp server."""
         self.target.write_text(
