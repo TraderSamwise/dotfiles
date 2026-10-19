@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 """Opt-in GPT launches and a machine-local launchd or systemd service."""
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
