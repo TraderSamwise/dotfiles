@@ -56,6 +56,7 @@ Across projects is not one of them, and cannot be asked.
     queue next [--anyone]                  start the oldest todo item here
     queue hand <id> --to <agent>           SAM ONLY: move it to another agent
     queue ls [--state S] [--mine] [--project]
+    queue summary [--since 48h] [--limit 15] [--state S] [--all]
     queue show <id>                        one item and its whole history
     queue start <id> --by <who>
     queue done  <id> --commit <sha> --proof "<evidence>"
@@ -72,7 +73,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path.home() / "cs" / "docs" / "agent-queue"
@@ -818,6 +819,56 @@ def cmd_delete(args) -> None:
         print("  " + line.strip())
 
 
+def parse_since(text: str) -> timedelta:
+    """`48h`, `7d`, `90m`: how far back a summary reaches."""
+    unit = text[-1:].lower()
+    amount = text[:-1]
+    if unit not in ("m", "h", "d") or not amount.isdigit():
+        sys.exit(f"queue: --since takes a number with m, h or d, like 48h (got {text!r})")
+    return timedelta(**{{"m": "minutes", "h": "hours", "d": "days"}[unit]: int(amount)})
+
+
+def last_touched(item: dict) -> str:
+    return max((e.get("at", "") for e in item["history"]), default=item.get("added", ""))
+
+
+def cmd_summary(args) -> None:
+    """
+    What moved recently, by state, for this agent.
+
+    Sam asked for it scoped per agent unless he says otherwise, every ask written
+    out in full, and a cap per state so a long backlog does not bury the rest:
+    the overflow is a count he can ask to have expanded.
+    """
+    cutoff = (datetime.now(timezone.utc) - parse_since(args.since)).isoformat(timespec="seconds")
+    items = fold(read_events(paths(repo_key())[0]))
+    rows = [i for i in items.values() if last_touched(i) >= cutoff]
+    if not args.all:
+        rows = [i for i in rows if owner_of(i) == handle()]
+    if args.state:
+        rows = [i for i in rows if i["state"] == args.state]
+    scope = "every agent" if args.all else handle()
+    if not rows:
+        print(f"Nothing touched in the last {args.since} for {scope}.")
+        return
+    print(f"Last {args.since}, {scope}:")
+    for state in ("done", "doing", "todo"):
+        group = sorted((i for i in rows if i["state"] == state), key=lambda i: id_order(i["id"]))
+        if not group:
+            continue
+        print(f"\n{state} ({len(group)})")
+        shown = group if args.limit == 0 else group[: args.limit]
+        for item in shown:
+            commit = item["evidence"].get("commit")
+            head = f"  {item['id']:<12}"
+            body = wrap(item["ask"] + (f" [{commit[:10]}]" if commit else ""), 88)
+            print(head + body[0].strip())
+            for line in body[1:]:
+                print(" " * len(head) + line.strip())
+        if len(group) > len(shown):
+            print(f"  ({len(group) - len(shown)} more: queue summary --since {args.since} --state {state} --limit 0)")
+
+
 def cmd_hand(args) -> None:
     """
     Sam moving work from one agent to another.
@@ -1062,6 +1113,13 @@ def main() -> None:
     d.add_argument("id")
     d.add_argument("--why", help="recorded in the log, not required")
     d.set_defaults(fn=cmd_delete)
+
+    sm = sub.add_parser("summary", help="what moved recently, by state, for this agent")
+    sm.add_argument("--since", default="48h", help="how far back, like 48h or 7d (default 48h)")
+    sm.add_argument("--limit", type=int, default=15, help="items shown per state; 0 shows all (default 15)")
+    sm.add_argument("--state", choices=STATES)
+    sm.add_argument("--all", action="store_true", help="every agent, not just this one")
+    sm.set_defaults(fn=cmd_summary)
 
     nx = sub.add_parser("next", help="start this agent's newest todo item here")
     nx.add_argument(

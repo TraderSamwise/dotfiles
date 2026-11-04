@@ -559,6 +559,23 @@ class QueueCase(unittest.TestCase):
         self.assertIn("old second ask", rendered)
         self.assertNotIn("old first ask", rendered)
 
+    def test_summary_is_per_agent_capped_and_counts_the_rest(self):
+        for n in range(17):
+            self.add_item("claude-overseer", f"mine {n}")
+        self.add_item("claude-other", "not mine")
+
+        out = self.run_queue("claude-overseer", "summary")
+
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("todo (17)", out.stdout)
+        self.assertIn("mine 0", out.stdout)
+        self.assertNotIn("mine 16", out.stdout)
+        self.assertIn("(2 more: queue summary --since 48h --state todo --limit 0)", out.stdout)
+        self.assertNotIn("not mine", out.stdout)
+        everyone = self.run_queue("claude-overseer", "summary", "--all", "--limit", "0")
+        self.assertIn("not mine", everyone.stdout)
+        self.assertIn("mine 16", everyone.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

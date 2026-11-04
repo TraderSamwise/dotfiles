@@ -239,8 +239,21 @@ IN FLIGHT
 - <agent> on <branch>: <one-line status> — <PR if open>
 
 QUEUE (<N> open)
-- <id> <doing|todo> <one line>
+- <id> <doing|todo> <the ask, written out>
+(<K> more todo — ask to expand)
 next: <id>
+```
+
+**QUEUE shows at most 15 items, each ask written out in full, then an
+`(<K> more …)` line** Sam can ask to have expanded (Sam, 2026-11-04). It stays
+per agent unless he says `all`. `queue summary` prints exactly that view from the
+log — this agent, by state, over a window — so use it rather than filtering by
+hand:
+
+```bash
+queue summary                          # this agent, last 48h, 15 per state
+queue summary --since 7d --all         # every agent
+queue summary --state todo --limit 0   # the expanded follow-up
 ```
 
 With `all`, add `MASTER COMMITS (not in the merged-PR list)`. End with one line
