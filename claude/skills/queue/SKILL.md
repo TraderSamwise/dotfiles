@@ -66,16 +66,16 @@ todo ─► doing ─► done
   └───────┴─────► blocked / wontdo ─► dropped
 ```
 
-**Three states, and Sam named them on 2026-09-04:** *"todo, doing, done. thats
+**Three states, and Sam named them on 2026-09-04:** _"todo, doing, done. thats
 it. and doing is when actively coding it or if we have to push debug logs or if
-there is a real need for verification. otherwise done is done."*
+there is a real need for verification. otherwise done is done."_
 
 So `doing` is not a holding pen. It means hands are on it — writing the code,
 debug logging out in the wild, or something that genuinely cannot be settled
 yet. **Never park an item in `doing` to wait for a release.** He also said:
-*"queue tasks should not wait on deployment UNLESS there is uncertainty of the
+_"queue tasks should not wait on deployment UNLESS there is uncertainty of the
 fix to a high degree. queueing is to just get shit done. ill requeue additional
-fixes if needed."* And: *"queue system is not a ticket system."*
+fixes if needed."_ And: _"queue system is not a ticket system."_
 
 `blocked`, `wontdo` and `dropped` are EXITS, not steps in that flow — waiting on
 Sam, proposing to abandon, and his ruling. They are why the diagram has a second
@@ -83,19 +83,19 @@ line.
 
 There were three states after `doing` — `landed` for a commit, `shipped` for
 something a person could reach, `verified` for Sam confirming it. He collapsed
-them on 2026-09-03: *"Shipped and landed are the same thing to me. Once it's
-done it's done, move on. I'll report if there is a follow up."*
+them on 2026-09-03: _"Shipped and landed are the same thing to me. Once it's
+done it's done, move on. I'll report if there is a follow up."_
 
 `wontdo` is a proposal and `dropped` is Sam's ruling — see below. An agent never
 reaches `dropped` on its own.
 
-| state | what it claims | what the tool demands |
-|---|---|---|
-| `todo` | he asked for it | his words |
-| `doing` | hands are on it, or it truly cannot be settled yet | `--by` |
-| `done` | it is written, and something you ran says so | `--commit` **and** `--proof` |
-| `wontdo` | you propose abandoning it | `--why`, and it stays listed |
-| `dropped` | **Sam agreed to abandon it** | Sam only |
+| state     | what it claims                                     | what the tool demands        |
+| --------- | -------------------------------------------------- | ---------------------------- |
+| `todo`    | he asked for it                                    | his words                    |
+| `doing`   | hands are on it, or it truly cannot be settled yet | `--by`                       |
+| `done`    | it is written, and something you ran says so       | `--commit` **and** `--proof` |
+| `wontdo`  | you propose abandoning it                          | `--why`, and it stays listed |
+| `dropped` | **Sam agreed to abandon it**                       | Sam only                     |
 
 ```bash
 queue start q7 --by claude
@@ -166,6 +166,17 @@ queue ls                  # outstanding in this repo
 queue ls --all            # every repo
 queue ls --state blocked
 queue show q7             # one item, all its history
+```
+
+When Sam asks for a summary of what moved (done / doing / todo over a window),
+run `queue summary` and paste its output. Sam set the defaults on 2026-11-04:
+**scoped to this agent unless he says otherwise**, every ask written out, and 15
+per state with an "(N more …)" line he can ask to have expanded.
+
+```bash
+queue summary                          # this agent, last 48h, 15 per state
+queue summary --since 7d --all         # every agent
+queue summary --state todo --limit 0   # the expanded follow-up
 ```
 
 ## Where it lives
