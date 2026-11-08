@@ -4,6 +4,10 @@
 
 input=$(cat)
 
+# Record the account rate limits Claude Code reports, so a usage monitor can read them outside a session.
+rl=$(echo "$input" | jq -c ".rate_limits // empty" 2>/dev/null)
+[ -n "$rl" ] && mkdir -p ~/.local/state && printf "%s\n" "$rl" > ~/.local/state/claude-rate-limits.json
+
 # Extract fields
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
 model=$(echo "$input" | jq -r '.model.display_name // empty')
